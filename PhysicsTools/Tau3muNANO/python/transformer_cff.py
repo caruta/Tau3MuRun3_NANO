@@ -9,6 +9,9 @@ The schema these tables implement is described in scripts/README_transformer.md.
 """
 import FWCore.ParameterSet.Config as cms
 from PhysicsTools.NanoAOD.common_cff import Var
+# clones of the release's generated defaults, so only parameters the producers accept are set
+from PhysicsTools.NanoAOD.simplePATJetFlatTableProducer_cfi import simplePATJetFlatTableProducer
+from PhysicsTools.NanoAOD.simpleGenEventFlatTableProducer_cfi import simpleGenEventFlatTableProducer
 
 _CHANNELS = {
     "Tau3Mu": dict(
@@ -117,13 +120,11 @@ def addTransformerTables(process, isMC, channel, addSoftMvaRun3=False,
         doPairFits=cms.bool(doPairFits),
     )
 
-    process.ctxJetTable = cms.EDProducer("SimplePATJetFlatTableProducer",
+    process.ctxJetTable = simplePATJetFlatTableProducer.clone(
         src=cms.InputTag("slimmedJetsPuppi"),
         cut=cms.string("pt > 15 && abs(eta) < 2.5"),
         name=cms.string("CtxJet"),
         doc=cms.string("AK4 Puppi jets for the transformer context (opposite-side b)"),
-        singleton=cms.bool(False),
-        extension=cms.bool(False),
         variables=cms.PSet(
             pt=Var("pt", float, precision=10),
             eta=Var("eta", float, precision=10),
@@ -140,13 +141,10 @@ def addTransformerTables(process, isMC, channel, addSoftMvaRun3=False,
     seq += process.candContext + process.ctxJetTable
 
     if isMC:
-        process.genWeightTable = cms.EDProducer("SimpleGenEventFlatTableProducer",
+        process.genWeightTable = simpleGenEventFlatTableProducer.clone(
             src=cms.InputTag("generator"),
-            cut=cms.string(""),
             name=cms.string("Generator"),
             doc=cms.string("Generator information"),
-            singleton=cms.bool(True),
-            extension=cms.bool(False),
             variables=cms.PSet(weight=Var("weight()", float, doc="MC generator weight")),
         )
         seq += process.genWeightTable

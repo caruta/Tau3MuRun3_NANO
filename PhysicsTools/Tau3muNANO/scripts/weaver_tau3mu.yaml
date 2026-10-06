@@ -1,0 +1,246 @@
+# weaver-core data config for the TAU3MU transformer (signal MC vs data sidebands).
+# Input files: output of flatten_for_transformer.py (one row per candidate).
+#
+# Mass-correlated features (cand_mass, cand_kin_mass, cand_m12/13/23, cand_ctau, the
+# pair_leg*_m* token columns) are NOT inputs: they are observers, and cand_kin_mass is the
+# variable to decorrelate against (DisCo / adversary) in the training code.
+# Sentinel values (-999) are mapped to the clip edge by the auto-standardization below.
+
+selection:
+  # |Q|=1 candidates; signal = truth-matched MC, background = data (sidebands only, SR is not written)
+  (cand_channel == 0) & (((isData == 0) & (label_sig == 1)) | (isData == 1))
+
+new_variables:
+  is_sig: (isData == 0) & (label_sig == 1)
+  is_bkg: isData == 1
+
+  # --- muon legs ---
+  mu_mask: ak.ones_like(mu_pt)
+  mu_log_pt: np.log(mu_pt)
+  mu_px: mu_pt * np.cos(mu_phi)
+  mu_py: mu_pt * np.sin(mu_phi)
+  mu_pz: mu_pt * np.sinh(mu_eta)
+  mu_energy: np.sqrt((mu_pt * np.cosh(mu_eta)) ** 2 + 0.0111637)
+  mu_deta: mu_eta - cand_eta
+  mu_dphi: (mu_phi - cand_phi + np.pi) % (2 * np.pi) - np.pi
+  mu_log_ip3d_pv_sig: np.log1p(np.maximum(mu_ip3d_pv_sig, 0))
+
+  # --- charged tracks ---
+  trk_mask: ak.ones_like(trk_pt)
+  trk_log_pt: np.log(trk_pt)
+  trk_log_ptrel: np.log(trk_pt / cand_pt)
+  trk_px: trk_pt * np.cos(trk_phi)
+  trk_py: trk_pt * np.sin(trk_phi)
+  trk_pz: trk_pt * np.sinh(trk_eta)
+  trk_energy: np.sqrt((trk_pt * np.cosh(trk_eta)) ** 2 + 0.0194797)
+  # signed log of impact parameters, x0 = 10 um
+  trk_slog_dxy: np.sign(trk_dxy) * np.log1p(np.abs(trk_dxy) / 0.001)
+  trk_slog_dz: np.sign(trk_dz) * np.log1p(np.abs(trk_dz) / 0.001)
+  trk_log_ip3d_sv: np.log1p(np.maximum(trk_ip3d_sv, 0) / 0.001)
+  trk_log_ip3d_sv_sig: np.log1p(np.maximum(trk_ip3d_sv_sig, 0))
+  trk_log_dcaFlight: np.log1p(np.maximum(trk_dcaFlight, 0) / 0.001)
+  trk_inSV: trk_svIdx >= 0
+  trk_has_dchi2: trk_sv_dchi2 > -998
+
+  # --- neutrals ---
+  neu_mask: ak.ones_like(neu_pt)
+  neu_log_pt: np.log(neu_pt)
+  neu_px: neu_pt * np.cos(neu_phi)
+  neu_py: neu_pt * np.sin(neu_phi)
+  neu_pz: neu_pt * np.sinh(neu_eta)
+  neu_energy: neu_pt * np.cosh(neu_eta)
+  neu_isPhoton: np.abs(neu_pdgId) == 22
+
+  # --- IVF secondary vertices ---
+  sv_mask: ak.ones_like(sv_pt)
+  sv_log_pt: np.log(sv_pt)
+  sv_px: sv_pt * np.cos(sv_phi)
+  sv_py: sv_pt * np.sin(sv_phi)
+  sv_pz: sv_pt * np.sinh(sv_eta)
+  sv_energy: np.sqrt((sv_pt * np.cosh(sv_eta)) ** 2 + sv_mass ** 2)
+  sv_log_distToCandSV: np.log1p(sv_distToCandSV / 0.001)
+
+  # --- candidate (global token) ---
+  cand_log_pt: np.log(cand_pt)
+  cand_log_L3Dsig: np.log1p(np.maximum(cand_flightDistSig, 0))
+  cand_log_LxySig: np.log1p(np.maximum(cand_flightDistXYSig, 0))
+
+preprocess:
+  method: manual
+  data_fraction: 0.5
+  params: null
+
+inputs:
+  cand_features:
+    # one global token per candidate; if your weaver version rejects length 1 for
+    # scalar branches, use length: null
+    length: 1
+    vars:
+      - [cand_log_pt, auto, auto, -5, 5]
+      - [cand_eta, null]
+      - [cand_prob, null]
+      - [cand_kin_prob, null]
+      - [cand_log_L3Dsig, auto, auto, -5, 5]
+      - [cand_log_LxySig, auto, auto, -5, 5]
+      - [cand_cosPointingAngle, auto, auto, -5, 5]
+      - [cand_d0_sig, auto, auto, -5, 5]
+      - [cand_d0max_sig, auto, auto, -5, 5]
+      - [cand_vprob12, null]
+      - [cand_vprob13, null]
+      - [cand_vprob23, null]
+      - [cand_iso_trk_dR03, auto, auto, -5, 5]
+      - [cand_iso_trk_dR05, auto, auto, -5, 5]
+      - [cand_n_trk_vtxcompat, auto, auto, -5, 5]
+      - [cand_nTrk_total, auto, auto, -5, 5]
+      - [cand_nNeu_total, auto, auto, -5, 5]
+      - [cand_nSV_total, auto, auto, -5, 5]
+      - [cand_dr_max, auto, auto, -5, 5]
+      - [cand_dz_max, auto, auto, -5, 5]
+  mu_features:
+    length: 3
+    pad_mode: constant
+    vars:
+      - [mu_log_pt, auto, auto, -5, 5]
+      - [mu_eta, null]
+      - [mu_deta, auto, auto, -5, 5]
+      - [mu_dphi, auto, auto, -5, 5]
+      - [mu_charge, null]
+      - [mu_isGlobal, null]
+      - [mu_isTracker, null]
+      - [mu_isPF, null]
+      - [mu_isStandalone, null]
+      - [mu_isMedium, null]
+      - [mu_isSoft, null]
+      - [mu_softMva, auto, auto, -5, 5]
+      - [mu_mvaId, auto, auto, -5, 5]
+      - [mu_mvaLowPt, auto, auto, -5, 5]
+      - [mu_segmComp, auto, auto, -5, 5]
+      - [mu_caloComp, auto, auto, -5, 5]
+      - [mu_trkKink, auto, auto, -5, 5]
+      - [mu_glbKink, auto, auto, -5, 5]
+      - [mu_chi2LocalPosition, auto, auto, -5, 5]
+      - [mu_chi2LocalMomentum, auto, auto, -5, 5]
+      - [mu_innerTrk_normChi2, auto, auto, -5, 5]
+      - [mu_innerTrk_ValidFraction, auto, auto, -5, 5]
+      - [mu_GLnormChi2, auto, auto, -5, 5]
+      - [mu_nValidPixelHits, auto, auto, -5, 5]
+      - [mu_trkLayersWMeas, auto, auto, -5, 5]
+      - [mu_nMatchedStations, auto, auto, -5, 5]
+      - [mu_timeAtIpInOut, auto, auto, -5, 5]
+      - [mu_log_ip3d_pv_sig, auto, auto, -5, 5]
+      - [mu_ip3d_sv_sig, auto, auto, -5, 5]
+  mu_vectors:
+    length: 3
+    pad_mode: constant
+    vars: [[mu_px, null], [mu_py, null], [mu_pz, null], [mu_energy, null]]
+  mu_mask:
+    length: 3
+    pad_mode: constant
+    vars: [[mu_mask, null]]
+  trk_features:
+    length: 64
+    pad_mode: constant
+    vars:
+      - [trk_log_pt, auto, auto, -5, 5]
+      - [trk_log_ptrel, auto, auto, -5, 5]
+      - [trk_deta, auto, auto, -5, 5]
+      - [trk_dphi, auto, auto, -5, 5]
+      - [trk_charge, null]
+      - [trk_isLostTrack, null]
+      - [trk_highPurity, null]
+      - [trk_hasTrackDetails, null]
+      - [trk_inCone, null]
+      - [trk_inCylinder, null]
+      - [trk_slog_dxy, auto, auto, -5, 5]
+      - [trk_slog_dz, auto, auto, -5, 5]
+      - [trk_log_ip3d_sv, auto, auto, -5, 5]
+      - [trk_log_ip3d_sv_sig, auto, auto, -5, 5]
+      - [trk_log_dcaFlight, auto, auto, -5, 5]
+      - [trk_nPixelHits, auto, auto, -5, 5]
+      - [trk_nHits, auto, auto, -5, 5]
+      - [trk_lostInnerHits, auto, auto, -5, 5]
+      - [trk_normChi2, auto, auto, -5, 5]
+      - [trk_fromPV, null]
+      - [trk_puppiWeight, null]
+      - [trk_isMuon, null]
+      - [trk_muon_softMva, auto, auto, -5, 5]
+      - [trk_inSV, null]
+      - [trk_has_dchi2, null]
+      - [trk_sv_dchi2, auto, auto, -5, 5]
+      - [trk_pair_leg1_dca, auto, auto, -5, 5]
+      - [trk_pair_leg2_dca, auto, auto, -5, 5]
+      - [trk_pair_leg3_dca, auto, auto, -5, 5]
+      - [trk_pair_leg1_vprob, null]
+      - [trk_pair_leg2_vprob, null]
+      - [trk_pair_leg3_vprob, null]
+  trk_vectors:
+    length: 64
+    pad_mode: constant
+    vars: [[trk_px, null], [trk_py, null], [trk_pz, null], [trk_energy, null]]
+  trk_mask:
+    length: 64
+    pad_mode: constant
+    vars: [[trk_mask, null]]
+  neu_features:
+    length: 32
+    pad_mode: constant
+    vars:
+      - [neu_log_pt, auto, auto, -5, 5]
+      - [neu_deta, auto, auto, -5, 5]
+      - [neu_dphi, auto, auto, -5, 5]
+      - [neu_dR_flight, auto, auto, -5, 5]
+      - [neu_inCone, null]
+      - [neu_inFlightCone, null]
+      - [neu_isPhoton, null]
+      - [neu_puppiWeight, null]
+      - [neu_hcalFraction, null]
+  neu_vectors:
+    length: 32
+    pad_mode: constant
+    vars: [[neu_px, null], [neu_py, null], [neu_pz, null], [neu_energy, null]]
+  neu_mask:
+    length: 32
+    pad_mode: constant
+    vars: [[neu_mask, null]]
+  sv_features:
+    length: 8
+    pad_mode: constant
+    vars:
+      - [sv_log_pt, auto, auto, -5, 5]
+      - [sv_mass, auto, auto, -5, 5]
+      - [sv_ntracks, auto, auto, -5, 5]
+      - [sv_chi2, auto, auto, -5, 5]
+      - [sv_dlenSig, auto, auto, -5, 5]
+      - [sv_dxySig, auto, auto, -5, 5]
+      - [sv_cosPAngle, auto, auto, -5, 5]
+      - [sv_log_distToCandSV, auto, auto, -5, 5]
+      - [sv_distToCandSVSig, auto, auto, -5, 5]
+      - [sv_sharesCandTrack, null]
+  sv_vectors:
+    length: 8
+    pad_mode: constant
+    vars: [[sv_px, null], [sv_py, null], [sv_pz, null], [sv_energy, null]]
+  sv_mask:
+    length: 8
+    pad_mode: constant
+    vars: [[sv_mask, null]]
+
+labels:
+  type: simple
+  value: [is_sig, is_bkg]
+
+observers:
+  - run
+  - event
+  - cand_idx
+  - fold
+  - cand_mass
+  - cand_kin_mass
+  - cand_kin_massErr
+  - cand_m12
+  - cand_m13
+  - cand_m23
+  - cand_ctau
+  - sig_prod
+
+weights: null
