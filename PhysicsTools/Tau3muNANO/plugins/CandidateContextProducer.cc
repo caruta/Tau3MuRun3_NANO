@@ -250,6 +250,10 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
           break;
         }
         const auto& pc = legTracks->at(idx);
+        if (!pc.hasTrackDetails()) {  // selectedTracks requires it, but never read a missing covariance
+          legsOk = false;
+          break;
+        }
         const auto& trk = pc.pseudoTrack();
         leg.tt = ttb.build(trk);
         leg.p4 = reco::Candidate::LorentzVector(trk.px(), trk.py(), trk.pz(), std::sqrt(trk.p2() + kPiMass * kPiMass));
@@ -348,7 +352,10 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
         t.dR = dR;
         t.deta = pc.eta() - cP4.eta();
         t.dphi = reco::deltaPhi(pc.phi(), cP4.phi());
-        t.tt = ttb.build(pc.pseudoTrack());
+        // Only tracks with stored details have a covariance; the others keep an invalid
+        // TransientTrack, so their IP/DCA/fit features are -999 and they sort last.
+        if (pc.hasTrackDetails())
+          t.tt = ttb.build(pc.pseudoTrack());
         t.dcaFlight = kBig;
         t.ip3dSV = t3m::kMissing;
         t.ip3dSVsig = kBig;
@@ -408,7 +415,7 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
     for (size_t k = 0; k < trks.size(); ++k) {
       const auto& t = trks[k];
       const auto& pc = *t.pc;
-      const auto& trk = pc.pseudoTrack();
+      const bool details = pc.hasTrackDetails();
       const int fromPV = (pvIdx >= 0 && pc.vertexRef().isNonnull()) ? pc.fromPV(pvIdx) : -1;
       t_cand.push_back(ic);
       t_pt.push_back(pc.pt());
@@ -425,16 +432,17 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
       t_inCone.push_back(t.inCone);
       t_inCyl.push_back(t.inCyl);
       t_dcaFlight.push_back(t.dcaFlight < kBig ? t.dcaFlight : t3m::kMissing);
-      t_dxy.push_back(trk.dxy(pvVtx.position()));
-      t_dz.push_back(trk.dz(pvVtx.position()));
-      t_dxyErr.push_back(trk.dxyError());
-      t_dzErr.push_back(trk.dzError());
+      // PackedCandidate::dxy/dz(point) need no covariance; the errors do
+      t_dxy.push_back(pc.dxy(pvVtx.position()));
+      t_dz.push_back(pc.dz(pvVtx.position()));
+      t_dxyErr.push_back(details ? pc.dxyError() : t3m::kMissing);
+      t_dzErr.push_back(details ? pc.dzError() : t3m::kMissing);
       t_ip3dSV.push_back(t.ip3dSV);
       t_ip3dSVsig.push_back(t.ip3dSVsig < kBig ? t.ip3dSVsig : t3m::kMissing);
       t_nPix.push_back(pc.numberOfPixelHits());
       t_nHits.push_back(pc.numberOfHits());
       t_lostInner.push_back(pc.lostInnerHits());
-      t_normChi2.push_back(pc.hasTrackDetails() ? trk.normalizedChi2() : t3m::kMissing);
+      t_normChi2.push_back(details ? pc.pseudoTrack().normalizedChi2() : t3m::kMissing);
       t_fromPV.push_back(fromPV);
       t_pvQual.push_back(pc.pvAssociationQuality());
       t_puppi.push_back(pc.puppiWeight());
@@ -458,8 +466,9 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
       t_dchi2.push_back(dchi2);
 
       // leg x track pair features
-      const reco::Candidate::LorentzVector pPi(trk.px(), trk.py(), trk.pz(), std::sqrt(trk.p2() + kPiMass * kPiMass));
-      const reco::Candidate::LorentzVector pK(trk.px(), trk.py(), trk.pz(), std::sqrt(trk.p2() + kKMass * kKMass));
+      const double p2 = pc.p() * pc.p();
+      const reco::Candidate::LorentzVector pPi(pc.px(), pc.py(), pc.pz(), std::sqrt(p2 + kPiMass * kPiMass));
+      const reco::Candidate::LorentzVector pK(pc.px(), pc.py(), pc.pz(), std::sqrt(p2 + kKMass * kKMass));
       for (int l = 0; l < 3; ++l) {
         float mpi = t3m::kMissing, mk = t3m::kMissing, dca = t3m::kMissing, vprob = t3m::kMissing;
         if (legsOk) {

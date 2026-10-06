@@ -24,6 +24,9 @@ same-sign triplets.
 | `CtxJet` | AK4 Puppi jets, pT > 15 GeV, with PNet and UParT b scores (−1000 if absent in the MiniAOD) |
 | `Generator` | `weight` (MC) |
 
+Tracks without stored track details in the MiniAOD (no covariance) are kept with their kinematics,
+`dxy` and `dz`, but their errors, IPs, DCAs and fit-based features are −999 and they sort last.
+
 Token rows carry `candIdx`, the candidate row in `Tau3Mu` / `Cand2MuTrk`. Missing values are −999.
 
 `genFlags` bits: 1 τ, 2 D<sub>s</sub>, 4 D⁺, 8 B hadron, 16 W, 32 φ, 64 η/η′/ρ/ω, 128 decay in
