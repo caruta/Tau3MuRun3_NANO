@@ -48,7 +48,7 @@ if __name__ == "__main__":
         
         cp "$pathtoskimfile/{config_file}" "$path_cfg";
         
-        sed -i "s#140X_dataRun3_v4#{globaltag}#g" "$path_cfg";
+        sed -i "s#160X_dataRun3_Prompt_v1#{globaltag}#g" "$path_cfg";
         sed -i "s#options.register('isMC', True#options.register('isMC', False#g" "$path_cfg";
 
         cp templates/report.sh "{dir_name}/report.sh";

@@ -24,15 +24,21 @@ from Configuration.AlCa.GlobalTag import GlobalTag
 if isMC:
     process.GlobalTag = GlobalTag(process.GlobalTag, '140X_mcRun3_2024_realistic_v26', '')
 else:
-    process.GlobalTag = GlobalTag(process.GlobalTag, '140X_dataRun3_v4', '')
+    process.GlobalTag = GlobalTag(process.GlobalTag, '160X_dataRun3_Prompt_v1', '')
 
 output_name = "tau3mu_output_MC.root" if isMC else "tau3mu_output_Data.root"
 
 process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(1000))
 
-process.source = cms.source = cms.Source("PoolSource",
-    fileNames = cms.untracked.vstring(
-        'root://xrootd-cms.infn.it//store/mc/RunIII2024Summer24MiniAOD/BdtoTau-Tauto3Mu_Fil-3Mu_TuneCP5_13p6TeV_pythia8-evtgen/MINIAODSIM/140X_mcRun3_2024_realistic_v26-v8/120000/029d6839-0ddd-426e-a47c-2a1452c22d2c.root')
+mc_files = [
+    'root://xrootd-cms.infn.it//store/mc/RunIII2024Summer24MiniAOD/BdtoTau-Tauto3Mu_Fil-3Mu_TuneCP5_13p6TeV_pythia8-evtgen/MINIAODSIM/140X_mcRun3_2024_realistic_v26-v8/120000/029d6839-0ddd-426e-a47c-2a1452c22d2c.root',
+]
+data_files = [
+    'root://xrootd-cms.infn.it//store/data/Run2024C/ParkingDoubleMuonLowMass0/MINIAOD/MINIv6NANOv15-v1/110000/001d80b3-cd40-4fb9-890c-32d1249c6c9e.root',
+]
+
+process.source = cms.Source("PoolSource",
+    fileNames = cms.untracked.vstring(mc_files if isMC else data_files)
 )
 
 process.load("PhysicsTools.Tau3muNANO.Tau3mu_builder_cff")
