@@ -12,7 +12,8 @@
 //
 // Token selection, ordering and truncation follow the ntuple schema:
 //   tracks   : inCone (dR < coneDR to candidate momentum) OR inCylinder (DCA to the PV->SV
-//              line < cylDCA and dR < cylMaxDR); ordered by 3D IP significance wrt the SV
+//              line < cylDCA and dR < cylMaxDR, not used in the candidate PV fit); ordered by
+//              3D IP significance wrt the SV
 //   neutrals : inCone (dR < neuConeDR to candidate momentum) OR inFlightCone (dR < neuConeDR
 //              to the PV->SV direction); ordered by the smaller of the two dR
 //   SVs      : all IVF SVs, ordered by 3D distance to the candidate SV
@@ -370,7 +371,9 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
           }
         }
         t.inCone = dR < coneDR_;
-        t.inCyl = t.dcaFlight < cylDCA_ && dR < cylMaxDR_;
+        // The PV->SV line starts at the PV, so every prompt track passes close to it there:
+        // tracks used in the candidate PV fit are excluded from the cylinder (still allowed in the cone).
+        t.inCyl = t.dcaFlight < cylDCA_ && dR < cylMaxDR_ && fromPV < pat::PackedCandidate::PVUsedInFit;
         if (!(t.inCone || t.inCyl))
           continue;
         nCone += t.inCone;
@@ -559,7 +562,7 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
   addCol(*trkTab, "dphi", t_dphi, "phi - candidate phi", 10);
   addCol(*trkTab, "dR", t_dR, "dR to candidate momentum", 10);
   addCol(*trkTab, "inCone", t_inCone, "dR < coneDR to candidate momentum");
-  addCol(*trkTab, "inCylinder", t_inCyl, "DCA to PV->SV line < cylDCA and dR < cylMaxDR");
+  addCol(*trkTab, "inCylinder", t_inCyl, "DCA to PV->SV line < cylDCA, dR < cylMaxDR, not used in the PV fit");
   addCol(*trkTab, "dcaFlight", t_dcaFlight, "distance to the PV->SV line [cm]", 10);
   addCol(*trkTab, "dxy", t_dxy, "dxy wrt candidate refitted PV [cm]", 10);
   addCol(*trkTab, "dz", t_dz, "dz wrt candidate refitted PV [cm]", 10);
