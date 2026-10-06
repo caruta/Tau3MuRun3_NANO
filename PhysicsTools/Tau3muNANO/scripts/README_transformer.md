@@ -18,7 +18,7 @@ same-sign triplets.
 | --- | --- |
 | `Tau3Mu`, `Cand2MuTrk` | `channel` (0 TAU3MU, 1 DSPHIPI, 2 SS3MU), `pv_idx`, SV and PV covariances (`sv_cxx` … `pv_czz`), kinematic-fit `kin_mass`, `kin_massErr`, `kin_prob`, pair masses `m12/m13/m23` and 2-track vertex probabilities `vprob12/13/23`, `ctau`, per-leg `refit_<leg>_eta/phi` and 3D IPs wrt PV and SV, context columns `iso_trk_dR03/05`, `n_trk_vtxcompat`, `nTrk_total`, `nTrk_cone`, `nTrk_cyl`, `nNeu_total`, `nSV_total` |
 | `Muon` | `srcIdx` (join key for `mu*_idx`), `isStandalone`, `nMatchedStations`, `inTimeMuon`, `timeAtIpInOut(Err)`, `softMvaRun3`, `sip3d`; MC: `genFlags`, `genMotherPdgId`, `genTauIdx`, `genHadronPdgId` |
-| `<Cand>Trk` | charged tracks (packed PF + lost tracks), pT > 0.5 GeV, `inCone` (ΔR < 1.0) or `inCylinder` (DCA to PV→SV line < 1 mm within ΔR < 1.5, not used in the PV fit), max 64 per candidate ordered by IP significance wrt the SV; IPs, hit counts, PV association, muon match, IVF SV membership, `sv_dchi2` (top 16), leg × track `pair_leg<i>_m_pi/m_K/dca/vprob` |
+| `<Cand>Trk` | charged tracks (packed PF + lost tracks), pT > 0.5 GeV, `inCone` (ΔR < 1.0) or `inCylinder` (DCA to PV→SV line < 1 mm within ΔR < 1.5, not used in the PV fit), max 128 per candidate ordered by IP significance wrt the SV; IPs, hit counts, PV association, muon match, IVF SV membership, `sv_dchi2` (top 16), leg × track `pair_leg<i>_m_pi/m_K/dca/vprob` |
 | `<Cand>Neu` | photons and neutral hadrons, pT > 0.3 GeV, ΔR < 0.5 to the candidate momentum or to the flight direction, max 32; leg × neutral masses |
 | `<Cand>SV` | IVF SVs ordered by distance to the candidate SV, max 8 |
 | `CtxJet` | AK4 Puppi jets, pT > 15 GeV, with PNet and UParT b scores (−1000 if absent in the MiniAOD) |

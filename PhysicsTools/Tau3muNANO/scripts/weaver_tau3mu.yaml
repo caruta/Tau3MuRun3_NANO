@@ -138,7 +138,7 @@ inputs:
     pad_mode: constant
     vars: [[mu_mask, null]]
   trk_features:
-    length: 64
+    length: 128
     pad_mode: constant
     vars:
       - [trk_log_pt, auto, auto, -5, 5]
@@ -174,11 +174,11 @@ inputs:
       - [trk_pair_leg2_vprob, null]
       - [trk_pair_leg3_vprob, null]
   trk_vectors:
-    length: 64
+    length: 128
     pad_mode: constant
     vars: [[trk_px, null], [trk_py, null], [trk_pz, null], [trk_energy, null]]
   trk_mask:
-    length: 64
+    length: 128
     pad_mode: constant
     vars: [[trk_mask, null]]
   neu_features:

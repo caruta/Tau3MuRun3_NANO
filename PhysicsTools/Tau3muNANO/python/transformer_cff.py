@@ -81,7 +81,7 @@ def muonVariables(isMC, addSoftMvaRun3):
 
 
 def addTransformerTables(process, isMC, channel, addSoftMvaRun3=True,
-                         maxTrk=64, maxNeu=32, maxSV=8, nDchi2=16, doPairFits=True):
+                         maxTrk=128, maxNeu=32, maxSV=8, nDchi2=16, doPairFits=True):
     ch = _CHANNELS[channel]
 
     candTable = getattr(process, ch["candTable"])
