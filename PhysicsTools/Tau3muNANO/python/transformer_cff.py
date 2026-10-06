@@ -17,12 +17,12 @@ _CHANNELS = {
     "Tau3Mu": dict(
         candTable="tau3muTable", candName="Tau3Mu", builder="tau3muBuilder", sequence="tau3muSequence",
         legs=["mu1", "mu2", "mu3"], legIdx=["mu1_idx", "mu2_idx", "mu3_idx"],
-        legIsTrack=[False, False, False], legTracks="",
+        legIsTrack=[0, 0, 0], legTracks="",
     ),
     "DsPhiPi": dict(
         candTable="cand2mu1trTable", candName="Cand2MuTrk", builder="cand2mu1trBuilder", sequence="cand2mu1trSequence",
         legs=["mu1", "mu2", "tr"], legIdx=["mu1_idx", "mu2_idx", "tr_idx"],
-        legIsTrack=[False, False, True], legTracks="selectedTracks",
+        legIsTrack=[0, 0, 1], legTracks="selectedTracks",
     ),
 }
 
@@ -101,7 +101,7 @@ def addTransformerTables(process, isMC, channel, addSoftMvaRun3=False,
         muons=cms.InputTag("muonsWithMatch" if isMC else "selectedMuons"),
         legTracks=cms.InputTag(ch["legTracks"]),
         legIdx=cms.vstring(ch["legIdx"]),
-        legIsTrack=cms.vbool(ch["legIsTrack"]),
+        legIsTrack=cms.vint32(ch["legIsTrack"]),
         pfCands=cms.InputTag("packedPFCandidates"),
         lostTracks=cms.InputTag("lostTracks"),
         allMuons=cms.InputTag("slimmedMuons"),

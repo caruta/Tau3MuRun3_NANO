@@ -128,7 +128,8 @@ public:
         candName_(cfg.getParameter<std::string>("candName")),
         prefix_(cfg.getParameter<std::string>("prefix")),
         legIdx_(cfg.getParameter<std::vector<std::string>>("legIdx")),
-        legIsTrack_(cfg.getParameter<std::vector<bool>>("legIsTrack")),
+        // vbool is not a valid ParameterSet type: legIsTrack is a vint32 of 0/1
+        legIsTrack_(cfg.getParameter<std::vector<int>>("legIsTrack")),
         trkMinPt_(cfg.getParameter<double>("trkMinPt")),
         trkMaxEta_(cfg.getParameter<double>("trkMaxEta")),
         coneDR_(cfg.getParameter<double>("coneDR")),
@@ -176,7 +177,7 @@ private:
   const edm::ESGetToken<TransientTrackBuilder, TransientTrackRecord> ttbToken_;
   const std::string candName_, prefix_;
   const std::vector<std::string> legIdx_;
-  const std::vector<bool> legIsTrack_;
+  const std::vector<int> legIsTrack_;
   const double trkMinPt_, trkMaxEta_, coneDR_, cylDCA_, cylMaxDR_, neuMinPt_, neuConeDR_;
   const unsigned int maxTrk_, maxNeu_, maxSV_, nDchi2_;
   const bool doPairFits_;
@@ -273,8 +274,8 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
     const GlobalPoint pvPos(pvVtx.x(), pvVtx.y(), pvVtx.z());
     const GlobalPoint svPos(svVtx.x(), svVtx.y(), svVtx.z());
     GlobalVector fdir = svPos - pvPos;
-    const float fEta = fdir.mag() > 0 ? fdir.eta() : cand.eta();
-    const float fPhi = fdir.mag() > 0 ? fdir.phi() : cand.phi();
+    const float fEta = fdir.mag() > 0 ? static_cast<float>(fdir.eta()) : static_cast<float>(cand.eta());
+    const float fPhi = fdir.mag() > 0 ? static_cast<float>(fdir.phi()) : static_cast<float>(cand.phi());
     fdir = fdir.mag() > 0 ? fdir.unit() : GlobalVector(cand.px(), cand.py(), cand.pz()).unit();
     const auto cP4 = cand.p4();
 

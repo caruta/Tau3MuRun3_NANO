@@ -17,6 +17,7 @@
 #include "TrackingTools/TransientTrack/interface/TransientTrackBuilder.h"
 #include "helper.h"
 #include "DataFormats/PatCandidates/interface/PackedGenParticle.h"
+#include "DataFormats/Common/interface/RefProd.h"
 #include "DataFormats/Math/interface/deltaR.h"
 
 namespace {
@@ -92,7 +93,8 @@ namespace {
     GenAncestry a;
     if (gen.isNull())
       return a;
-    const reco::GenParticleCollection* coll = gen.product();
+    // Ref::product() is not public; RefProd gives the collection the Ref points into
+    const reco::GenParticleCollection* coll = edm::RefProd<reco::GenParticleCollection>(gen).product();
     const reco::Candidate* mother = gen->mother();
     while (mother != nullptr) {
       const int apdg = std::abs(mother->pdgId());
