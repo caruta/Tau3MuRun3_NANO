@@ -65,10 +65,10 @@ def muonVariables(isMC, addSoftMvaRun3):
         inTimeMuon=Var("passed('InTimeMuon')", bool),
         timeAtIpInOut=Var("time().timeAtIpInOut", float, doc="muon time at IP, inside-out [ns]"),
         timeAtIpInOutErr=Var("time().timeAtIpInOutErr", float, doc="uncertainty of timeAtIpInOut [ns]"),
-        mvaLowPt=Var("lowptMvaValue()", float, doc="low-pT muon MVA ID"),
     )
     if addSoftMvaRun3:
-        # only in releases whose pat::Muon has softMvaRun3Value()
+        # pat::Muon::softMvaRun3Value() exists in recent releases (checked in CMSSW_17_0);
+        # pass addSoftMvaRun3=False for an older release that lacks it
         v["softMvaRun3"] = Var("softMvaRun3Value()", float, doc="soft MVA Run 3 ID")
     if isMC:
         v.update(
@@ -80,7 +80,7 @@ def muonVariables(isMC, addSoftMvaRun3):
     return v
 
 
-def addTransformerTables(process, isMC, channel, addSoftMvaRun3=False,
+def addTransformerTables(process, isMC, channel, addSoftMvaRun3=True,
                          maxTrk=64, maxNeu=32, maxSV=8, nDchi2=16, doPairFits=True):
     ch = _CHANNELS[channel]
 

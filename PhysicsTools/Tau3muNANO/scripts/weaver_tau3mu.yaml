@@ -113,7 +113,7 @@ inputs:
       - [mu_isSoft, null]
       - [mu_softMva, auto, auto, -5, 5]
       - [mu_mvaId, auto, auto, -5, 5]
-      - [mu_mvaLowPt, auto, auto, -5, 5]
+      - [mu_softMvaRun3, auto, auto, -5, 5]
       - [mu_segmComp, auto, auto, -5, 5]
       - [mu_caloComp, auto, auto, -5, 5]
       - [mu_trkKink, auto, auto, -5, 5]
