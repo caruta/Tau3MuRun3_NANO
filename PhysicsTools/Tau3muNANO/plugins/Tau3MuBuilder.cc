@@ -20,6 +20,7 @@
 #include "TMath.h"
 #include "helper.h"
 #include "diMuonResonances.h"
+#include "CandFeatureHelpers.h"
 
 #include "DataFormats/MuonReco/interface/MuonChamberMatch.h"
 #include "DataFormats/MuonReco/interface/MuonSegmentMatch.h"
@@ -47,6 +48,8 @@ public:
         vtxToken_(consumes<reco::VertexCollection>(cfg.getParameter<edm::InputTag>("vertices"))),
         pcToken_(consumes<pat::PackedCandidateCollection>(cfg.getParameter<edm::InputTag>("candidates"))),
         bsToken_(consumes<reco::BeamSpot>(cfg.getParameter<edm::InputTag>("beamSpot"))),
+        // |total charge| values to build: {1} = signal-like triplets, add 3 for the SS3MU control sample
+        absCharges_(cfg.getParameter<std::vector<int>>("absCharges")),
         ttbToken_(esConsumes<TransientTrackBuilder, TransientTrackRecord>(edm::ESInputTag("", "TransientTrackBuilder"))) {
         produces<pat::CompositeCandidateCollection>();
     }
@@ -72,7 +75,8 @@ public:
                     pat::CompositeCandidate cand;
                     const pat::Muon &m1 = muons->at(i), &m2 = muons->at(j), &m3 = muons->at(k);
                     if (m1.innerTrack().isNull() || m2.innerTrack().isNull() || m3.innerTrack().isNull()) continue;
-                    if (std::abs(m1.charge() + m2.charge() + m3.charge()) != 1) continue;
+                    const int absQ = std::abs(m1.charge() + m2.charge() + m3.charge());
+                    if (std::find(absCharges_.begin(), absCharges_.end(), absQ) == absCharges_.end()) continue;
                     std::vector<reco::TransientTrack> muTTracks = {ttb.build(m1.innerTrack()), ttb.build(m2.innerTrack()), ttb.build(m3.innerTrack())};
                     KalmanVertexFitter svFitter(true);
                     TransientVertex sv = svFitter.vertex(muTTracks);
@@ -82,11 +86,17 @@ public:
                     // --- Refitted Kinematics ---
                     reco::Candidate::LorentzVector p4_ref(0,0,0,0);
                     std::vector<double> refit_pts;
+                    std::vector<reco::Track> refit_trks;
+                    std::array<reco::Candidate::LorentzVector, 3> leg_p4;
                     for(const auto& rt : sv.refittedTracks()) {
                         double mass_sq = std::sqrt(rt.track().p2() + 0.0111636); //Muon mass
-                        p4_ref += reco::Candidate::LorentzVector(rt.track().px(), rt.track().py(), rt.track().pz(), mass_sq);
+                        reco::Candidate::LorentzVector lp4(rt.track().px(), rt.track().py(), rt.track().pz(), mass_sq);
+                        p4_ref += lp4;
+                        if (refit_trks.size() < 3) leg_p4[refit_trks.size()] = lp4;
                         refit_pts.push_back(rt.track().pt());
+                        refit_trks.push_back(rt.track());
                     }
+                    if (refit_trks.size() != 3) continue;
 
                     // --- PV Selection & Refit Logic ---
                     std::vector<int> validVtxIndices;
@@ -258,6 +268,24 @@ public:
                     cand.addUserFloat("d0_sig", d0_sig);
                     cand.addUserFloat("d0max_sig", d0max_sig);
 
+                    // --- Transformer-ntuple features (see CandFeatureHelpers.h) ---
+                    cand.addUserInt("channel", absQ == 1 ? 0 : 2);  // 0 = TAU3MU, 2 = SS3MU
+                    cand.addUserInt("pv_idx", (int)b_idx);
+                    cand.addUserFloat("pv_ndof", cleanPV.ndof());
+                    t3m::addVertexCov(cand, "sv", sv.positionError());
+                    t3m::addVertexCov(cand, "pv", cleanPV);
+                    cand.addUserFloat("ctau", p4_ref.P() > 0 ? d3d.value() * p4_ref.M() / p4_ref.P() : t3m::kMissing);
+                    {
+                        const reco::Vertex svVtx(sv);
+                        const char* legs[3] = {"mu1", "mu2", "mu3"};
+                        for (int l = 0; l < 3; ++l)
+                            t3m::addLegFeatures(cand, legs[l], muTTracks[l], refit_trks[l], cleanPV, svVtx);
+                    }
+                    t3m::addPairFeatures(cand, leg_p4, muTTracks);
+                    t3m::addKinFit(cand, muTTracks,
+                                   {bph::MUON_MASS, bph::MUON_MASS, bph::MUON_MASS},
+                                   {bph::LEP_SIGMA, bph::LEP_SIGMA, bph::LEP_SIGMA});
+
                     bool isResonance = vetoResonances(evt, ttb, i, j, k, cand);
                     cand.addUserInt("isVetoResonance", isResonance ? 1 : 0);
                     ret_val->push_back(cand);
@@ -357,6 +385,7 @@ private:
     const edm::EDGetTokenT<reco::VertexCollection> vtxToken_;
     const edm::EDGetTokenT<pat::PackedCandidateCollection> pcToken_;
     const edm::EDGetTokenT<reco::BeamSpot> bsToken_;
+    const std::vector<int> absCharges_;
     const edm::ESGetToken<TransientTrackBuilder, TransientTrackRecord> ttbToken_;
 };
 

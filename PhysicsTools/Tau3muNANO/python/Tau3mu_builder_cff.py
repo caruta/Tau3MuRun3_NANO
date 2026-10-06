@@ -3,6 +3,7 @@ from PhysicsTools.NanoAOD.common_cff import *
 from PhysicsTools.NanoAOD.simpleGenParticleFlatTableProducer_cfi import simpleGenParticleFlatTableProducer
 from PhysicsTools.NanoAOD.muons_cff import muonTable
 from PhysicsTools.NanoAOD.globalVariablesTableProducer_cfi import globalVariablesTableProducer
+from PhysicsTools.Tau3muNANO.transformer_cff import addTransformerTables
 
 
 # --- 0. TRIGGER PATHS ---
@@ -29,7 +30,7 @@ L1_path_list = cms.vstring(
         )
 
 # --- 1. EVENT FILTERS (HLT & SKIMMING) ---
-def setupTau3Mu(process, isMC):
+def setupTau3Mu(process, isMC, transformer=True):
     # HLT Filter: Select events passing specific trigger paths
     process.hltFilter = cms.EDFilter("HLTHighLevel",
         HLTPaths = cms.vstring([path + "*" for path in HLT_path_list]),
@@ -52,7 +53,7 @@ def setupTau3Mu(process, isMC):
     # Technical Skim: Combiner for 3 Muons (Charge Requirement)
     process.ThreeMuonsCand = cms.EDProducer("CandViewShallowCloneCombiner",
         checkCharge = cms.bool(False),
-        cut = cms.string('(abs(charge)==1)'), # Require total charge |Q| = 1
+        cut = cms.string('(abs(charge)==1) || (abs(charge)==3)'), # |Q| = 1 signal-like, |Q| = 3 same-sign control (SS3MU)
         decay = cms.string("selectedMuons selectedMuons selectedMuons")
     ) 
 
@@ -111,6 +112,7 @@ def setupTau3Mu(process, isMC):
         candidates = cms.InputTag("packedPFCandidates"),
         beamSpot = cms.InputTag("offlineBeamSpot"),
         genParticles = cms.InputTag("myFinalGenParticles"),
+        absCharges = cms.vint32(1, 3), # Tau3Mu_channel tells them apart: 0 = |Q|=1, 2 = |Q|=3
     )
 
     # BPH Muon Selector for Trigger Matching
@@ -441,3 +443,7 @@ def setupTau3Mu(process, isMC):
     # Append Gen Table if MC
     if isMC:
         process.tau3muSequence += process.myGenParticleTable
+
+    # Context tokens and extra features for transformer training
+    if transformer:
+        addTransformerTables(process, isMC, "Tau3Mu")

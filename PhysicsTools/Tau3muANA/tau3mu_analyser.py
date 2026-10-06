@@ -225,7 +225,8 @@ def process_tau3mu_events(sub_df, isMC):
 
 
     # Combine all base cuts
-    base_cuts = acceptance & muon_id #& pv_sv_significance_cut
+    # |Q|=1 only: the ntuples now also contain same-sign (|Q|=3) control triplets
+    base_cuts = acceptance & muon_id & (abs(sub_df.Tau3Mu_charge) == 1) #& pv_sv_significance_cut
     dak_base_cuts = dak.sum(dak.any(base_cuts, axis=1)) 
     selected_fields = [
         col for col in dak.fields(sub_df)

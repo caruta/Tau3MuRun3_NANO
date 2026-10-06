@@ -16,6 +16,8 @@
 #include "DataFormats/MuonReco/interface/MuonSelectors.h"
 #include "TVector3.h"
 #include "TMath.h"
+#include "helper.h"
+#include "CandFeatureHelpers.h"
 
 #include "DataFormats/MuonReco/interface/MuonChamberMatch.h"
 #include "DataFormats/MuonReco/interface/MuonSegmentMatch.h"
@@ -106,13 +108,19 @@ public:
                     // --- Refitted Kinematics ---
                     reco::Candidate::LorentzVector p4_ref(0,0,0,0);
                     std::vector<double> refit_pts;
+                    std::vector<reco::Track> refit_trks;
+                    std::array<reco::Candidate::LorentzVector, 3> leg_p4;
                     int idx_rt = 0;
                     for(const auto& rt : sv.refittedTracks()) {
                         double mass_sq = (idx_rt < 2) ? 0.0111636 : 0.019479; // Muon mass vs Pion mass
-                        p4_ref += reco::Candidate::LorentzVector(rt.track().px(), rt.track().py(), rt.track().pz(), std::sqrt(rt.track().p2() + mass_sq));
+                        reco::Candidate::LorentzVector lp4(rt.track().px(), rt.track().py(), rt.track().pz(), std::sqrt(rt.track().p2() + mass_sq));
+                        p4_ref += lp4;
+                        if (idx_rt < 3) leg_p4[idx_rt] = lp4;
                         refit_pts.push_back(rt.track().pt());
+                        refit_trks.push_back(rt.track());
                         idx_rt++;
                     }
+                    if (refit_trks.size() != 3) continue;
 
                     // --- PV Selection ---
                     std::vector<int> validVtxIndices;
@@ -276,6 +284,24 @@ public:
                     cand.addUserFloat("mu1_iso04_clean", mu1_iso04_clean);
                     cand.addUserFloat("mu2_iso03_clean", mu2_iso03_clean);
                     cand.addUserFloat("mu2_iso04_clean", mu2_iso04_clean);
+
+                    // --- Transformer-ntuple features (see CandFeatureHelpers.h) ---
+                    cand.addUserInt("channel", 1);  // 1 = DSPHIPI
+                    cand.addUserInt("pv_idx", (int)b_idx);
+                    cand.addUserFloat("pv_ndof", cleanPV.ndof());
+                    t3m::addVertexCov(cand, "sv", sv.positionError());
+                    t3m::addVertexCov(cand, "pv", cleanPV);
+                    cand.addUserFloat("ctau", p4_ref.P() > 0 ? d3d.value() * p4_ref.M() / p4_ref.P() : t3m::kMissing);
+                    {
+                        const reco::Vertex svVtx(sv);
+                        const char* legs[3] = {"mu1", "mu2", "tr"};
+                        for (int l = 0; l < 3; ++l)
+                            t3m::addLegFeatures(cand, legs[l], muTTracks[l], refit_trks[l], cleanPV, svVtx);
+                    }
+                    t3m::addPairFeatures(cand, leg_p4, muTTracks);
+                    t3m::addKinFit(cand, muTTracks,
+                                   {bph::MUON_MASS, bph::MUON_MASS, bph::PI_MASS},
+                                   {bph::LEP_SIGMA, bph::LEP_SIGMA, bph::PI_SIGMA});
 
                     ret_val->push_back(cand);
                 }

@@ -2,6 +2,7 @@ import FWCore.ParameterSet.Config as cms
 from PhysicsTools.NanoAOD.common_cff import *
 from PhysicsTools.NanoAOD.simpleGenParticleFlatTableProducer_cfi import simpleGenParticleFlatTableProducer
 from PhysicsTools.NanoAOD.muons_cff import muonTable
+from PhysicsTools.Tau3muNANO.transformer_cff import addTransformerTables
 
 
 # --- 0. TRIGGER PATHS ---
@@ -28,7 +29,7 @@ L1_path_list = cms.vstring(
         )
 
 # --- 1. EVENT FILTERS (HLT & SKIMMING) ---
-def setupDsPhiPi(process, isMC):
+def setupDsPhiPi(process, isMC, transformer=True):
     # HLT Filter: Select events passing specific trigger paths
     process.hltFilter = cms.EDFilter("HLTHighLevel",
         HLTPaths = cms.vstring([path + "*" for path in HLT_path_list]),
@@ -454,3 +455,7 @@ def setupDsPhiPi(process, isMC):
     # Append Gen Table if MC
     if isMC:
         process.cand2mu1trSequence += process.myGenParticleTable
+
+    # Context tokens and extra features for transformer training
+    if transformer:
+        addTransformerTables(process, isMC, "DsPhiPi")
