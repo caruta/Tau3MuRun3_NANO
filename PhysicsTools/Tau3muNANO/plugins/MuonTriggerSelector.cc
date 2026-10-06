@@ -207,6 +207,9 @@ void MuonTriggerSelector::produce(edm::Event &iEvent, const edm::EventSetup &iSe
     muons_out->back().addUserFloat("trgDR", muonDR[iMuo]);
     muons_out->back().addUserFloat("trgDPT", muonDPT[iMuo]);
     muons_out->back().addUserInt("looseId", loose_id[iMuo]);
+    // index in the input collection: the candidate builders' mu*_idx refer to it,
+    // so it is the key to join candidate legs with this table even if a muon is skipped above
+    muons_out->back().addUserInt("srcIdx", iMuo);
 
     for (unsigned int i = 0; i < HLTPaths_.size(); i++)
       muons_out->back().addUserInt(HLTPaths_[i], fires[iMuo][i]);

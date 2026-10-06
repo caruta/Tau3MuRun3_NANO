@@ -201,8 +201,8 @@ def setupTau3Mu(process, isMC):
         mu3_match2_pullX = Var("userFloat('mu3_match2_pullX')", float),
 
         isVetoResonance = Var("userInt('isVetoResonance')", int),
-        diMuVtxFit_bestProb = Var("userFloat('diMuVtxFit_bestProb')", int),
-        diMuVtxFit_bestMass = Var("userFloat('diMuVtxFit_bestMass')", int),
+        diMuVtxFit_bestProb = Var("userFloat('diMuVtxFit_bestProb')", float),
+        diMuVtxFit_bestMass = Var("userFloat('diMuVtxFit_bestMass')", float),
 
         dr12 = Var("userFloat('dr12')", float),
         dr23 = Var("userFloat('dr23')", float),
@@ -237,7 +237,8 @@ def setupTau3Mu(process, isMC):
             dxyErr = Var("edB('PV2D')", float, doc="dxy uncertainty", precision=12),
             dz     = Var("dB('PVDZ')", float, doc="dz (with sign) wrt PV[0]", precision=12),
             dzErr  = Var("abs(edB('PVDZ'))", float, doc="dz uncertainty", precision=12),
-            ip3d   = Var("abs(dB('PV3D'))", float, doc="3D impact parameter significance"),
+            ip3d   = Var("abs(dB('PV3D'))", float, doc="3D impact parameter wrt PV[0], in cm"),
+            sip3d  = Var("?edB('PV3D')>0?abs(dB('PV3D')/edB('PV3D')):-1", float, doc="3D impact parameter significance wrt PV[0]"),
 
             # --- Identification & Quality ---
             isPF     = Var("isPFMuon", bool),

@@ -44,6 +44,12 @@
 <use   name="MagneticField/Records"/>
 <use   name="TrackingTools/Records"/>
 <use   name="TrackingTools/IPTools"/>
+<use   name="TrackingTools/PatternTools"/>
+<use   name="DataFormats/VertexReco"/>
+<use   name="DataFormats/JetReco"/>
+<use   name="DataFormats/NanoAOD"/>
+<use   name="SimDataFormats/GeneratorProducts"/>
+<use   name="DataFormats/HepMCCandidate"/>
 <use   name="TrackingTools/GsfTracking"/>
 <use   name="DataFormats/EgammaCandidates"/>
 <use   name="DataFormats/BeamSpot"/>

@@ -1,7 +1,7 @@
 #include "PhysicsTools/Tau3muNANO/interface/PVRefitter.h"
 #include <algorithm>
 #include "DataFormats/Math/interface/deltaR.h"
-#include <iostream>
+#include "FWCore/MessageLogger/interface/MessageLogger.h"
 
 std::vector<reco::TransientTrack> PVRefitter::removeTracks(
     const std::vector<reco::TransientTrack>& pvTracks,
@@ -19,10 +19,10 @@ std::vector<reco::TransientTrack> PVRefitter::removeTracks(
                 isShared = true;
                 
                 // Debug message for track removal
-                std::cout << "[PVRefitter] Track removed from PV refit: "
+                LogDebug("PVRefitter") << "Track removed from PV refit: "
                           << "pt=" << pvTrack.track().pt() 
                           << ", eta=" << pvTrack.track().eta() 
-                          << ", dr with SV track=" << dr << std::endl;
+                          << ", dr with SV track=" << dr;
                 
                 break;
             }

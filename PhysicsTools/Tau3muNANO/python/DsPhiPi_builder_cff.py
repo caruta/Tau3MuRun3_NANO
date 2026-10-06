@@ -247,7 +247,8 @@ def setupDsPhiPi(process, isMC):
             dxyErr = Var("edB('PV2D')", float, doc="dxy uncertainty", precision=12),
             dz     = Var("dB('PVDZ')", float, doc="dz (with sign) wrt PV[0]", precision=12),
             dzErr  = Var("abs(edB('PVDZ'))", float, doc="dz uncertainty", precision=12),
-            ip3d   = Var("abs(dB('PV3D'))", float, doc="3D impact parameter significance"),
+            ip3d   = Var("abs(dB('PV3D'))", float, doc="3D impact parameter wrt PV[0], in cm"),
+            sip3d  = Var("?edB('PV3D')>0?abs(dB('PV3D')/edB('PV3D')):-1", float, doc="3D impact parameter significance wrt PV[0]"),
 
             # --- Identification & Quality ---
             isPF     = Var("isPFMuon", bool),
