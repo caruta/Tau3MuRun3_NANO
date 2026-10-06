@@ -92,6 +92,7 @@ def addTransformerTables(process, isMC, channel, addSoftMvaRun3=False,
 
     if isMC:
         process.muonsWithMatch.packedGen = cms.InputTag("packedGenParticles")
+        process.muonsWithMatch.genParticles = process.muonGenMatch.matched  # GenPart indices for genTauIdx
         process.myFinalGenParticles.select.append(_EXTRA_GEN)
 
     process.candContext = cms.EDProducer("CandidateContextProducer",

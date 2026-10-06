@@ -17,7 +17,6 @@
 #include "TrackingTools/TransientTrack/interface/TransientTrackBuilder.h"
 #include "helper.h"
 #include "DataFormats/PatCandidates/interface/PackedGenParticle.h"
-#include "DataFormats/Common/interface/RefProd.h"
 #include "DataFormats/Math/interface/deltaR.h"
 
 namespace {
@@ -89,12 +88,11 @@ namespace {
 
   // Walk the mother chain of a matched gen muon. tauIdx is the index of the tau ancestor in the
   // gen collection of the match (the one written as GenPart), so legs from the same tau share it.
-  GenAncestry getAncestry(const reco::GenParticleRef& gen) {
+  // coll: the gen collection the match points into (nullptr -> tauIdx stays -1)
+  GenAncestry getAncestry(const reco::GenParticleRef& gen, const reco::GenParticleCollection* coll) {
     GenAncestry a;
     if (gen.isNull())
       return a;
-    // Ref::product() is not public; RefProd gives the collection the Ref points into
-    const reco::GenParticleCollection* coll = edm::RefProd<reco::GenParticleCollection>(gen).product();
     const reco::Candidate* mother = gen->mother();
     while (mother != nullptr) {
       const int apdg = std::abs(mother->pdgId());
@@ -140,6 +138,11 @@ public:
       packedGen_ = consumes<std::vector<pat::PackedGenParticle> >(cfg.getParameter<edm::InputTag>("packedGen"));
       hasPackedGen_ = true;
     }
+    // Optional: the gen collection used by the matcher, to turn the tau ancestor into a GenPart index
+    if (cfg.existsAs<edm::InputTag>("genParticles")) {
+      genParticles_ = consumes<reco::GenParticleCollection>(cfg.getParameter<edm::InputTag>("genParticles"));
+      hasGenParticles_ = true;
+    }
     produces<PATOBJCollection>();
   }
 
@@ -153,6 +156,8 @@ private:
   const edm::EDGetTokenT<edm::Association<reco::GenParticleCollection> > matching_;
   edm::EDGetTokenT<std::vector<pat::PackedGenParticle> > packedGen_;
   bool hasPackedGen_ = false;
+  edm::EDGetTokenT<reco::GenParticleCollection> genParticles_;
+  bool hasGenParticles_ = false;
 };
 
 template <typename PATOBJ>
@@ -167,6 +172,10 @@ void MatchEmbedder<PATOBJ>::produce(edm::StreamID, edm::Event &evt, edm::EventSe
   edm::Handle<std::vector<pat::PackedGenParticle> > packedGen;
   if (hasPackedGen_)
     evt.getByToken(packedGen_, packedGen);
+  edm::Handle<reco::GenParticleCollection> genParticles;
+  const reco::GenParticleCollection* genColl = nullptr;
+  if (hasGenParticles_ && evt.getByToken(genParticles_, genParticles) && genParticles.isValid())
+    genColl = genParticles.product();
 
   size_t nsrc = src->size();
   // output
@@ -180,7 +189,9 @@ void MatchEmbedder<PATOBJ>::produce(edm::StreamID, edm::Event &evt, edm::EventSe
     out->back().addUserInt("mcMatch", match.isNonnull() ? match->pdgId() : 0);
     out->back().addUserInt("genOrigin", getGenOrigin(match));
 
-    GenAncestry anc = getAncestry(match);
+    // only use the collection if it is the one the match points into
+    const bool sameColl = genColl != nullptr && match.isNonnull() && match.id() == genParticles.id();
+    GenAncestry anc = getAncestry(match, sameColl ? genColl : nullptr);
     int hadronPdgId = 0;
     if (match.isNull() && hasPackedGen_) {
       // decay in flight / punch-through: closest charged pion or kaon with compatible pT
