@@ -38,6 +38,7 @@ new_variables:
   trk_slog_dz: np.sign(trk_dz) * np.log1p(np.abs(trk_dz) / 0.001)
   trk_log_ip3d_sv: np.log1p(np.maximum(trk_ip3d_sv, 0) / 0.001)
   trk_log_ip3d_sv_sig: np.log1p(np.maximum(trk_ip3d_sv_sig, 0))
+  trk_log_ip3d_pv_sig: np.log1p(np.maximum(trk_ip3d_pv_sig, 0))
   trk_log_dcaFlight: np.log1p(np.maximum(trk_dcaFlight, 0) / 0.001)
   trk_inSV: trk_svIdx >= 0
   trk_has_dchi2: trk_sv_dchi2 > -998
@@ -155,6 +156,7 @@ inputs:
       - [trk_slog_dz, auto, auto, -5, 5]
       - [trk_log_ip3d_sv, auto, auto, -5, 5]
       - [trk_log_ip3d_sv_sig, auto, auto, -5, 5]
+      - [trk_log_ip3d_pv_sig, auto, auto, -5, 5]
       - [trk_log_dcaFlight, auto, auto, -5, 5]
       - [trk_nPixelHits, auto, auto, -5, 5]
       - [trk_nHits, auto, auto, -5, 5]

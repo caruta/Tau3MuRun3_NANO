@@ -12,7 +12,7 @@
 //
 // Token selection, ordering and truncation follow the ntuple schema:
 //   tracks   : inCone (dR < coneDR to candidate momentum) OR inCylinder (DCA to the PV->SV
-//              line < cylDCA and dR < cylMaxDR, not used in the candidate PV fit); ordered by
+//              line < cylDCA, dR < cylMaxDR, 3D IP significance wrt PV > cylMinIPSig); ordered by
 //              3D IP significance wrt the SV
 //   neutrals : inCone (dR < neuConeDR to candidate momentum) OR inFlightCone (dR < neuConeDR
 //              to the PV->SV direction); ordered by the smaller of the two dR
@@ -70,7 +70,7 @@ namespace {
     reco::TransientTrack tt;
     bool isLost, inCone, inCyl;
     float dR, deta, dphi, dcaFlight;
-    float ip3dSV, ip3dSVsig;
+    float ip3dSV, ip3dSVsig, ip3dPV, ip3dPVsig;
     int svTok;
     float muonSoftMva;
     bool isMuon, isLooseMuon;
@@ -136,6 +136,7 @@ public:
         coneDR_(cfg.getParameter<double>("coneDR")),
         cylDCA_(cfg.getParameter<double>("cylDCA")),
         cylMaxDR_(cfg.getParameter<double>("cylMaxDR")),
+        cylMinIPSig_(cfg.getParameter<double>("cylMinIPSig")),
         neuMinPt_(cfg.getParameter<double>("neuMinPt")),
         neuConeDR_(cfg.getParameter<double>("neuConeDR")),
         maxTrk_(cfg.getParameter<unsigned int>("maxTrk")),
@@ -179,7 +180,7 @@ private:
   const std::string candName_, prefix_;
   const std::vector<std::string> legIdx_;
   const std::vector<int> legIsTrack_;
-  const double trkMinPt_, trkMaxEta_, coneDR_, cylDCA_, cylMaxDR_, neuMinPt_, neuConeDR_;
+  const double trkMinPt_, trkMaxEta_, coneDR_, cylDCA_, cylMaxDR_, cylMinIPSig_, neuMinPt_, neuConeDR_;
   const unsigned int maxTrk_, maxNeu_, maxSV_, nDchi2_;
   const bool doPairFits_;
   bool hasLegTracks_ = false;
@@ -221,7 +222,7 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
   std::vector<int> t_cand, t_charge, t_pdgId, t_nPix, t_nHits, t_lostInner, t_fromPV, t_pvQual, t_svIdx;
   std::vector<bool> t_isLost, t_hp, t_hasDetails, t_inCone, t_inCyl, t_isMuon, t_isLooseMuon;
   std::vector<float> t_pt, t_eta, t_phi, t_deta, t_dphi, t_dR, t_dcaFlight, t_dxy, t_dz, t_dxyErr, t_dzErr,
-      t_ip3dSV, t_ip3dSVsig, t_normChi2, t_puppi, t_hcalFrac, t_muSoftMva, t_dchi2;
+      t_ip3dSV, t_ip3dSVsig, t_ip3dPV, t_ip3dPVsig, t_normChi2, t_puppi, t_hcalFrac, t_muSoftMva, t_dchi2;
   std::vector<float> t_pair[3][4];  // per leg: m_pi, m_K, dca, vprob
 
   std::vector<int> n_cand, n_pdgId;
@@ -360,6 +361,8 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
         t.dcaFlight = kBig;
         t.ip3dSV = t3m::kMissing;
         t.ip3dSVsig = kBig;
+        t.ip3dPV = t3m::kMissing;
+        t.ip3dPVsig = t3m::kMissing;
         if (t.tt.isValid()) {
           const auto tsc = t.tt.trajectoryStateClosestToPoint(svPos);
           if (tsc.isValid())
@@ -369,11 +372,17 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
             t.ip3dSV = ip.second.value();
             t.ip3dSVsig = ip.second.significance();
           }
+          const auto ipPV = IPTools::absoluteImpactParameter3D(t.tt, pvVtx);
+          if (ipPV.first) {
+            t.ip3dPV = ipPV.second.value();
+            t.ip3dPVsig = ipPV.second.significance();
+          }
         }
         t.inCone = dR < coneDR_;
-        // The PV->SV line starts at the PV, so every prompt track passes close to it there:
-        // tracks used in the candidate PV fit are excluded from the cylinder (still allowed in the cone).
-        t.inCyl = t.dcaFlight < cylDCA_ && dR < cylMaxDR_ && fromPV < pat::PackedCandidate::PVUsedInFit;
+        // The PV->SV line starts at the PV, so every PV-compatible track passes close to it there.
+        // The cylinder is for displaced tracks near the flight path: require IP significance wrt
+        // the refitted PV above cylMinIPSig (prompt tracks can still enter through the cone).
+        t.inCyl = t.dcaFlight < cylDCA_ && dR < cylMaxDR_ && t.ip3dPVsig > cylMinIPSig_;
         if (!(t.inCone || t.inCyl))
           continue;
         nCone += t.inCone;
@@ -442,6 +451,8 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
       t_dzErr.push_back(details ? pc.dzError() : t3m::kMissing);
       t_ip3dSV.push_back(t.ip3dSV);
       t_ip3dSVsig.push_back(t.ip3dSVsig < kBig ? t.ip3dSVsig : t3m::kMissing);
+      t_ip3dPV.push_back(t.ip3dPV);
+      t_ip3dPVsig.push_back(t.ip3dPVsig);
       t_nPix.push_back(pc.numberOfPixelHits());
       t_nHits.push_back(pc.numberOfHits());
       t_lostInner.push_back(pc.lostInnerHits());
@@ -562,7 +573,7 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
   addCol(*trkTab, "dphi", t_dphi, "phi - candidate phi", 10);
   addCol(*trkTab, "dR", t_dR, "dR to candidate momentum", 10);
   addCol(*trkTab, "inCone", t_inCone, "dR < coneDR to candidate momentum");
-  addCol(*trkTab, "inCylinder", t_inCyl, "DCA to PV->SV line < cylDCA, dR < cylMaxDR, not used in the PV fit");
+  addCol(*trkTab, "inCylinder", t_inCyl, "DCA to PV->SV line < cylDCA, dR < cylMaxDR, 3D IP sig wrt PV > cylMinIPSig");
   addCol(*trkTab, "dcaFlight", t_dcaFlight, "distance to the PV->SV line [cm]", 10);
   addCol(*trkTab, "dxy", t_dxy, "dxy wrt candidate refitted PV [cm]", 10);
   addCol(*trkTab, "dz", t_dz, "dz wrt candidate refitted PV [cm]", 10);
@@ -570,6 +581,8 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
   addCol(*trkTab, "dzErr", t_dzErr, "dz uncertainty [cm]", 10);
   addCol(*trkTab, "ip3d_sv", t_ip3dSV, "3D IP wrt candidate SV [cm]", 10);
   addCol(*trkTab, "ip3d_sv_sig", t_ip3dSVsig, "3D IP significance wrt candidate SV", 10);
+  addCol(*trkTab, "ip3d_pv", t_ip3dPV, "3D IP wrt candidate refitted PV [cm]", 10);
+  addCol(*trkTab, "ip3d_pv_sig", t_ip3dPVsig, "3D IP significance wrt candidate refitted PV", 10);
   addCol(*trkTab, "nPixelHits", t_nPix, "valid pixel hits");
   addCol(*trkTab, "nHits", t_nHits, "valid hits");
   addCol(*trkTab, "lostInnerHits", t_lostInner, "lost inner hits");
