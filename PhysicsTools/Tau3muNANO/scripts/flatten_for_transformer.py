@@ -188,6 +188,9 @@ def process_chunk(arr, channel, is_data, sr, mass_window, nfolds):
     # selection: mass window and blinding (data, |Q|=1 TAU3MU only)
     mass = out["cand_mass"]
     keep = (mass >= mass_window[0]) & (mass <= mass_window[1])
+    if "cand_nTrk_total" in out:
+        # candidates outside the CMSSW context mass window have no tokens (nTrk_total = -1)
+        keep &= out["cand_nTrk_total"] >= 0
     if is_data and channel == "Tau3Mu":
         in_sr = (mass >= sr[0]) & (mass <= sr[1])
         if "cand_kin_mass" in out:

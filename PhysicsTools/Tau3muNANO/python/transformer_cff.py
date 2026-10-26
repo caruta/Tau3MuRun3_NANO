@@ -81,7 +81,8 @@ def muonVariables(isMC, addSoftMvaRun3):
 
 
 def addTransformerTables(process, isMC, channel, addSoftMvaRun3=True,
-                         maxTrk=128, maxNeu=32, maxSV=8, nDchi2=16, doPairFits=True):
+                         maxTrk=128, maxNeu=32, maxSV=8, nDchi2=16, doPairFits=True,
+                         ctxMassWindow=(1.2, 2.5)):
     ch = _CHANNELS[channel]
 
     candTable = getattr(process, ch["candTable"])
@@ -120,6 +121,10 @@ def addTransformerTables(process, isMC, channel, addSoftMvaRun3=True,
         maxSV=cms.uint32(maxSV),
         nDchi2=cms.uint32(nDchi2),
         doPairFits=cms.bool(doPairFits),
+        # tokens only for candidates with Kalman or kin-fit mass in this window [GeV];
+        # (0, 0) builds them for every candidate
+        ctxMinMass=cms.double(ctxMassWindow[0]),
+        ctxMaxMass=cms.double(ctxMassWindow[1]),
     )
 
     process.ctxJetTable = simplePATJetFlatTableProducer.clone(

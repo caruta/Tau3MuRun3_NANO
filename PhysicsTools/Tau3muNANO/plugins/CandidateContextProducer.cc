@@ -152,7 +152,9 @@ public:
         maxNeu_(cfg.getParameter<unsigned int>("maxNeu")),
         maxSV_(cfg.getParameter<unsigned int>("maxSV")),
         nDchi2_(cfg.getParameter<unsigned int>("nDchi2")),
-        doPairFits_(cfg.getParameter<bool>("doPairFits")) {
+        doPairFits_(cfg.getParameter<bool>("doPairFits")),
+        ctxMinMass_(cfg.getParameter<double>("ctxMinMass")),
+        ctxMaxMass_(cfg.getParameter<double>("ctxMaxMass")) {
     if (legIdx_.size() != 3 || legIsTrack_.size() != 3)
       throw cms::Exception("Configuration") << "CandidateContextProducer: legIdx and legIsTrack need 3 entries";
     const auto legTracksTag = cfg.getParameter<edm::InputTag>("legTracks");
@@ -192,6 +194,9 @@ private:
   const double trkMinPt_, trkMaxEta_, coneDR_, cylDCA_, cylMaxDR_, cylMinIPSig_, neuMinPt_, neuConeDR_;
   const unsigned int maxTrk_, maxNeu_, maxSV_, nDchi2_;
   const bool doPairFits_;
+  // Tokens are built only for candidates with Kalman or kinematic-fit mass in [ctxMinMass, ctxMaxMass];
+  // ctxMaxMass <= ctxMinMass disables the window.
+  const double ctxMinMass_, ctxMaxMass_;
   bool hasLegTracks_ = false;
 };
 
@@ -248,6 +253,17 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
 
   for (size_t ic = 0; ic < nCand; ++ic) {
     const auto& cand = cands->at(ic);
+
+    if (ctxMaxMass_ > ctxMinMass_) {
+      auto inWindow = [&](double m) { return m >= ctxMinMass_ && m <= ctxMaxMass_; };
+      const bool kinOk = cand.hasUserInt("kin_ok") && cand.userInt("kin_ok") == 1;
+      if (!(inWindow(cand.mass()) || (kinOk && inWindow(cand.userFloat("kin_mass"))))) {
+        // outside the context window: no token rows, counters -1, isolation -999
+        c_iso03[ic] = c_iso05[ic] = t3m::kMissing;
+        c_nVtxCompat[ic] = c_nTrk[ic] = c_nTrkCone[ic] = c_nTrkCyl[ic] = c_nNeu[ic] = c_nSV[ic] = -1;
+        continue;
+      }
+    }
 
     // --- legs ---
     std::vector<Leg> legs;
@@ -562,7 +578,7 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
   addCol(*candTab, "iso_trk_dR03", c_iso03, "sum pT of PV-associated tracks (PVTight or better) in dR<0.3, legs excluded", 10);
   addCol(*candTab, "iso_trk_dR05", c_iso05, "sum pT of PV-associated tracks (PVTight or better) in dR<0.5, legs excluded", 10);
   addCol(*candTab, "n_trk_vtxcompat", c_nVtxCompat, "tracks in cone with 3D IP significance wrt SV < 2");
-  addCol(*candTab, "nTrk_total", c_nTrk, "track tokens before truncation (cone OR cylinder)");
+  addCol(*candTab, "nTrk_total", c_nTrk, "track tokens before truncation (cone OR cylinder); -1 = outside the context mass window, no tokens");
   addCol(*candTab, "nTrk_cone", c_nTrkCone, "track tokens inCone before truncation");
   addCol(*candTab, "nTrk_cyl", c_nTrkCyl, "track tokens inCylinder before truncation");
   addCol(*candTab, "nNeu_total", c_nNeu, "neutral tokens before truncation");

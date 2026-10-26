@@ -27,6 +27,12 @@ same-sign triplets.
 Tracks without stored track details in the MiniAOD (no covariance) are kept with their kinematics,
 `dxy` and `dz`, but their errors, IPs, DCAs and fit-based features are −999 and they sort last.
 
+Tokens are built only for candidates with Kalman or kinematic-fit mass in 1.2–2.5 GeV
+(`ctxMassWindow` in `addTransformerTables`; `(0, 0)` builds them for every candidate). The candidate
+and muon tables still contain all candidates; those outside the window have `nTrk_total = nNeu_total =
+nSV_total = -1`, isolation −999 and no token rows, and the flattener skips them. In 2024 data, 98 % of
+candidates are outside this window (mostly above 6 GeV), so this saves most of the token storage and CPU.
+
 Token rows carry `candIdx`, the candidate row in `Tau3Mu` / `Cand2MuTrk`. Missing values are −999.
 
 `genFlags` bits: 1 τ, 2 D<sub>s</sub>, 4 D⁺, 8 B hadron, 16 W, 32 φ, 64 η/η′/ρ/ω, 128 decay in
