@@ -47,17 +47,21 @@
 
     "2024": {
         "Eras": ["C", "D", "E", "F", "G", "H", "I", "I-v2","I-v3"],
-        "GTs": ["150X_dataRun3_v2","150X_dataRun3_v2","150X_dataRun3_v2", "150X_dataRun3_v2", "150X_dataRun3_v2", "150X_dataRun3_v2","150X_dataRun3_v2", "150X_dataRun3_v2", "150X_dataRun3_v2"],
+        "GTs": ["160X_dataRun3_Prompt_v1", "160X_dataRun3_Prompt_v1", "160X_dataRun3_Prompt_v1", "160X_dataRun3_Prompt_v1", "160X_dataRun3_Prompt_v1", "160X_dataRun3_Prompt_v1", "160X_dataRun3_Prompt_v1", "160X_dataRun3_Prompt_v1", "160X_dataRun3_Prompt_v1"],
         "golden_json": ["Collisions24/2024C_Golden.json", "Collisions24/2024D_Golden.json","Collisions24/2024E_Golden.json","Collisions24/2024F_Golden.json", "Collisions24/2024G_Golden.json",
                         "Collisions24/2024H_Golden.json", "Collisions24/2024I_Golden.json", "Collisions24/2024I_Golden.json","Collisions24/2024I_Golden.json"
                     ],
         "database": "ParkingDoubleMuonLowMass*",
         "Campaign": ["Run2024C-MINIv6NANOv15-v*", "Run2024D-MINIv6NANOv15-v*", "Run2024E-MINIv6NANOv15-v*", "Run2024F-MINIv6NANOv15-v*", "Run2024G-MINIv6NANOv15-v*", "Run2024H-MINIv6NANOv15-v*", "Run2024I-MINIv6NANOv15_v2-v2", "Run2024I-MINIv6NANOv15_v2", "Run2024I-MINIv6NANOv15_v3"],
         
-        "MC_era": ["MC_DsPhiPi"],
-        "MC_input_type": ["global"],
-        "MC_GTs": ["150X_mcRun3_2024_realistic_v4"],
-        "MC_datasets": ["/DstoPhiPi-Phito2Mu_Fil-Mu_TuneCP5_13p6TeV_pythia8-evtgen/RunIII2024Summer24MiniAODv6-150X_mcRun3_2024_realistic_v2-v3/MINIAODSIM"
+        "MC_era": ["MC_DsPhiPi", "MC_Bd", "MC_Bu", "MC_Ds"],
+        "MC_channel": ["control", "signal", "signal", "signal"],
+        "MC_input_type": ["global", "global", "global", "global"],
+        "MC_GTs": ["150X_mcRun3_2024_realistic_v4", "140X_mcRun3_2024_realistic_v26", "140X_mcRun3_2024_realistic_v26", "140X_mcRun3_2024_realistic_v26"],
+        "MC_datasets": ["/DstoPhiPi-Phito2Mu_Fil-Mu_TuneCP5_13p6TeV_pythia8-evtgen/RunIII2024Summer24MiniAODv6-150X_mcRun3_2024_realistic_v2-v3/MINIAODSIM",
+                        "/BdtoTau-Tauto3Mu_Fil-3Mu_TuneCP5_13p6TeV_pythia8-evtgen/RunIII2024Summer24MiniAOD-140X_mcRun3_2024_realistic_v26-v8/MINIAODSIM",
+                        "/ButoTau-Tauto3Mu*/RunIII2024Summer24MiniAOD-140X_mcRun3_2024_realistic_v26*/MINIAODSIM",
+                        "/DstoTau-Tauto3Mu*/RunIII2024Summer24MiniAOD-140X_mcRun3_2024_realistic_v26*/MINIAODSIM"
         ]
     },
 

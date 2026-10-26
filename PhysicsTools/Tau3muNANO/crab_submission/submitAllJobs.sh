@@ -1,14 +1,16 @@
 #!/bin/sh
 # Usage:
-#    submitAllJobs.sh
+#    source submitAllJobs.sh [Year] [isMC] [channel] [tag]
+#    channel: signal (Tau3Mu) or control (DsPhiPi); tag defaults to Transformer_v1
 
-helpstring="Usage: submitAllJobs.sh [Year] [isMC] [channel]"
+helpstring="Usage: source submitAllJobs.sh [Year] [isMC: true|false] [channel: signal|control] [tag, default Transformer_v1]"
 
 year=$1
 MCflag=$2
 channel=$3
+tag=${4:-Transformer_v1}
 
-if [ -z ${2+x} ]; then
+if [ -z ${3+x} ] || { [ "$channel" != "signal" ] && [ "$channel" != "control" ]; }; then
     echo -e ${helpstring}
     return
 fi
@@ -24,7 +26,6 @@ declare -a era2022preE=("C" "D-v1" "D-v2" "E")
 declare -a era2022postE=("F" "G")
 declare -a era2023=("B" "C-v1" "C-v2" "C-v3" "C-v4" "D-v1" "D-v2")
 declare -a era2024=("C" "D" "E" "F" "G" "H" "I" "I-v2" "I-v3")
-declare -a era2024=("I-v3")
 declare -a era2025=("B" "C-v1" "C-v2" "D" "E" "F-v1" "F-v2" "G")
 readarray -t MCeras22 < <(jq -r '.["2022"].MC_era[]' Runs.json)
 readarray -t MCeras23 < <(jq -r '.["2023"].MC_era[]' Runs.json)
@@ -34,7 +35,7 @@ current_dir=$(pwd)
 
 if [ "$MCflag" == "false" ]; then
     type=""
-    if [[ "$current_dir" == *"CMSSW_15_"* ]]; then
+    if [[ "$current_dir" == *"CMSSW_15_"* ]] || [[ "$current_dir" == *"CMSSW_16_"* ]] || [[ "$current_dir" == *"CMSSW_17_"* ]]; then
         if [[ "$year" == "2025" ]]; then
             era=("${era2025[@]}")
         elif [[ "$year" == "2024" ]]; then
@@ -80,6 +81,6 @@ fi
 
 for i in "${era[@]}"; do
     echo -e "\nData $i"
-    python3 submit_CRAB.py --year ${year} --${type}era ${i} --channel ${channel}
+    python3 submit_CRAB.py --year ${year} --${type}era ${i} --channel ${channel} --tag ${tag}
     sleep 1
 done

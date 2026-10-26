@@ -32,17 +32,21 @@ The main informations on data and MC samples are stored in the `Runs.json` file 
 ### Run ntuplizer on a full dataset for one specific year:
 ```
 cd crab_submission
-source submit_AllJobs.sh [Year] [isMC]
+voms-proxy-init --voms cms --rfc --valid 192:00
+python3 getDatset.py --year 2024          # once per year: writes datasets/datasets_<year>_<era>.txt from DAS
+source submitAllJobs.sh [year] [isMC] [channel] [tag]
 ```
-* `[year]` = `2022`,  `2023` or `2024`: `[MCflag]` = `true or false`
+* `[year]` = `2022`, `2023`, `2024` or `2025`; `[isMC]` = `true` or `false`; `[channel]` = `signal` (Tau3Mu) or `control` (DsPhiPi); `[tag]` defaults to `Transformer_v1`.
+* Data: one directory per era, `<year>_era<era>_<channel>_<tag>`, with one CRAB task per parking stream. MC: one task per sample in `Runs.json`; samples whose `MC_channel` differs from `[channel]` are skipped.
+* An MC dataset name with `*` in `Runs.json` is resolved with DAS at submission and must match exactly one dataset.
+* Jobs process all events (`maxEvents` defaults to -1); for local tests pass e.g. `maxEvents=1000`.
 
-Note that `submit_AllJobs.sh` needs to be updated with the list of the eras for the year under analysis, if it has not been added yet.
-To check the status of the jobs for the whole eras, you can use the `status.sh` contained in each era directory.
-If there are failed jobs you can run:
+To check or resubmit, use `status.sh`, `report.sh` and `resubmit.sh` in each data directory, or for a whole production:
 ```
-source resubmitAll.sh [Year]
+source resubmitAll.sh [year] [channel] [tag]
 ```
-NB: for the moment this is written only for data. TO-DO: add MC treatment.
+
+<p>&nbsp;</p>
 
 Let's move now to the analysis directory Tau3MuANA!
 <p>&nbsp;</p>

@@ -28,7 +28,8 @@ else:
 
 output_name = "tau3mu_output_MC.root" if isMC else "tau3mu_output_Data.root"
 
-process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(1000))
+# maxEvents=N on the command line; default -1 (all events), which is what CRAB jobs need
+process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(options.maxEvents))
 
 mc_files = [
     'root://xrootd-cms.infn.it//store/mc/RunIII2024Summer24MiniAOD/BdtoTau-Tauto3Mu_Fil-3Mu_TuneCP5_13p6TeV_pythia8-evtgen/MINIAODSIM/140X_mcRun3_2024_realistic_v26-v8/120000/029d6839-0ddd-426e-a47c-2a1452c22d2c.root',

@@ -28,7 +28,8 @@ else:
 
 output_name = "dsphipi_output_MC.root" if isMC else "dsphipi_output_Data.root"
 
-process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(1000))
+# maxEvents=N on the command line; default -1 (all events), which is what CRAB jobs need
+process.maxEvents = cms.untracked.PSet(input = cms.untracked.int32(options.maxEvents))
 
 mc_files = [
     'root://xrootd-cms.infn.it//store/mc/Run3Summer23MiniAODv4/DstoPhiPi_Phito2Mu_MuFilter_TuneCP5_13p6TeV_pythia8-evtgen/MINIAODSIM/130X_mcRun3_2023_realistic_v14-v2/2810000/23794a69-978d-4aa5-83c9-60265065cc5b.root',

@@ -4,7 +4,7 @@ The custom NanoAOD now carries everything needed to train a ParT/UParT-style cla
 τ→3μ candidates: candidate-level fit features, the three legs, and context tokens (charged
 tracks, neutrals, IVF secondary vertices, jets) around each candidate. Production is two steps:
 
-1. **CMSSW** (`cmsRun test/test_Tau3Mu_cfg.py`, or CRAB as before): per-event tables, as usual.
+1. **CMSSW** (`cmsRun test/test_Tau3Mu_cfg.py maxEvents=1000`, or CRAB as before): per-event tables, as usual.
 2. **Flattening** (`scripts/flatten_for_transformer.py`): one row per candidate, jagged token
    branches, blinding, k-fold split. Its output is what `scripts/weaver_tau3mu.yaml` reads.
 

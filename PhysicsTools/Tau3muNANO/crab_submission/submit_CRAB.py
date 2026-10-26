@@ -1,4 +1,24 @@
-import subprocess, json, time, os, argparse
+import subprocess, json, time, os, argparse, shutil
+
+
+def resolve_dataset(pattern):
+    """Exact dataset names pass through; a name with '*' is resolved with DAS and must match exactly one dataset."""
+    if "*" not in pattern:
+        return pattern
+    das = "/cvmfs/cms.cern.ch/common/dasgoclient"
+    if not os.path.exists(das):
+        das = shutil.which("dasgoclient") or das
+    out = subprocess.run([das, f"-query=dataset dataset={pattern}"], capture_output=True, text=True)
+    matches = [l.strip() for l in out.stdout.splitlines() if l.strip()]
+    if len(matches) != 1:
+        print(f"ERROR: {pattern} matches {len(matches)} datasets in DAS (need exactly 1):")
+        for m in matches:
+            print("   ", m)
+        print("Put the exact name in Runs.json (MC_datasets) and submit again. A valid grid proxy is needed for DAS.")
+        exit(1)
+    print(f"Resolved {pattern}\n      -> {matches[0]}")
+    return matches[0]
+
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
@@ -6,16 +26,18 @@ if __name__ == "__main__":
     argparser.add_argument("--era", type=str, default=None, help="Era of the dataset")
     argparser.add_argument("--MCera", type=str, default=None, help="MC Era of the dataset")
     argparser.add_argument("--channel", required=True, choices=["signal", "control"], help="Select 'signal' or 'control'")
+    argparser.add_argument("--tag", default="Transformer_v1", help="Production tag in request names and output paths")
     args = argparser.parse_args()
     
     year = args.year
     era = args.era
     MCera = args.MCera
     channel = args.channel
+    tag = args.tag
 
     # Definizione nome directory e file config
     suffix = era if era else MCera
-    dir_name = f"{year}_era{suffix}_{channel}"
+    dir_name = f"{year}_era{suffix}_{channel}_{tag}"
     channel_name = "Tau3mu" if channel == "signal" else "DsPhiPi"
     config_file = "test_Tau3Mu_cfg.py" if channel == "signal" else "test_DsPhiPi_cfg.py"
     
@@ -58,6 +80,7 @@ if __name__ == "__main__":
         sed -i "s#YEAR#{year}#g" *.sh;
         sed -i "s#ERANAME#{era}#g" *.sh;
         sed -i "s#CHANNELNAME#{channel_name}#g" *.sh;
+        sed -i "s#PRODTAG#{tag}#g" *.sh;
         cd ..;
         cp templates/submit.sh "{dir_name}/submit.sh";
         """
@@ -72,6 +95,7 @@ if __name__ == "__main__":
             sed -i "s#YEAR#{year}#g" "{dir_name}/CRAB_stream_{i}.py";
             sed -i "s#ERANAME#{era}#g" "{dir_name}/CRAB_stream_{i}.py";
             sed -i "s#NUMBER#{i}#g" "{dir_name}/CRAB_stream_{i}.py";
+            sed -i "s#PRODTAG#{tag}#g" "{dir_name}/CRAB_stream_{i}.py";
             sed -i "s#DATASET_NAME#{dataset}#g" "{dir_name}/CRAB_stream_{i}.py";
             sed -i "s#FILE_TO_SUBMIT_PATH#$path#g" "{dir_name}/CRAB_stream_{i}.py";
             sed -i "s#GOLDEN_JSON_PATH#{golden_json}#g" "{dir_name}/CRAB_stream_{i}.py";
@@ -88,9 +112,13 @@ if __name__ == "__main__":
             print(f"WARNING: {MCera} is not in the list of MC_eras. Please check.")
             exit()
             
+        if "MC_channel" in data and data["MC_channel"][era_index] != channel:
+            print(f"Skipping {MCera}: it is a '{data['MC_channel'][era_index]}' sample, this submission is '{channel}'.")
+            exit()
+
         MC_input_type = data["MC_input_type"][era_index]
         globaltag = data["MC_GTs"][era_index]
-        MC_datasets = data["MC_datasets"][era_index]
+        MC_datasets = resolve_dataset(data["MC_datasets"][era_index])
 
 
         command = f"""
@@ -120,6 +148,7 @@ if __name__ == "__main__":
         sed -i "s#DATASET_NAME#{MC_datasets}#g" "{dir_name}/CRAB_MC.py";
         sed -i "s#FILE_TO_SUBMIT_PATH#$path#g" "{dir_name}/CRAB_MC.py";
         sed -i "s#INPUT_TYPE#{MC_input_type}#g" "{dir_name}/CRAB_MC.py";
+        sed -i "s#PRODTAG#{tag}#g" "{dir_name}/CRAB_MC.py";
         
         cd "{dir_name}";
         crab submit -c "CRAB_MC.py";
