@@ -1,0 +1,13 @@
+# Flatten a CRAB production on HTCondor. From the work directory made by make_flatten_jobs.py:
+#   condor_submit cmssw=$CMSSW_BASE $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub
+# Failed jobs only (list written by check_flat_production.py):
+#   condor_submit cmssw=$CMSSW_BASE jobs=jobs_failed.txt $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub
+executable     = $(cmssw)/src/PhysicsTools/Tau3muNANO/scripts/run_flatten.sh
+arguments      = $(cmssw) $(channel) $(isdata) $(prefix) $(filelist)
+output         = logs/flatten.$(ClusterId).$(ProcId).out
+error          = logs/flatten.$(ClusterId).$(ProcId).err
+log            = logs/flatten.log
+request_cpus   = 1
+request_memory = 4GB
+
+queue channel, isdata, prefix, filelist from $(jobs:jobs.txt)

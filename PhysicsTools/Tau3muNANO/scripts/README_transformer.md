@@ -67,6 +67,36 @@ Writes `<prefix>_fold<k>.root` (tree `Events`) with `cand_*`, `mu_*` (3 legs), `
 - **Folds:** `fold = hash(run, event) mod 5`, so all candidates of an event share a fold.
 - **Mass window:** 1.40–2.20 GeV by default (`--mass-window`).
 
+## After the CRAB production
+
+All commands inside `cmsenv`, from `$CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts`; `<you>` is your
+storage user name (outputs under `/lustre/cms/store/user/<you>` at T2_IT_Bari).
+
+**Ds → φπ peak in data** (step 2): cut flow, best candidate per event, fit of D⁺ and Dₛ on an
+exponential background (needs scipy; without it, a sideband subtraction).
+
+```bash
+python3 check_dsphipi_peak.py -o ds_2024C.png \
+    "/lustre/cms/store/user/<you>/ParkingDoubleMuonLowMass*/SkimDsPhiPi_2024eraC_stream*_Transformer_v1/*/*/*.root"
+```
+
+**Flattening on HTCondor** (step 3):
+
+```bash
+python3 make_flatten_jobs.py --base /lustre/cms/store/user/<you> --tag Transformer_v1 --year 2024 \
+    --out-dir /lustre/cms/store/user/<you>/flat_Transformer_v1 --work-dir ~/flatten_jobs
+cd ~/flatten_jobs && condor_submit cmssw=$CMSSW_BASE $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub
+# when the jobs are done:
+python3 $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/check_flat_production.py \
+    --work-dir ~/flatten_jobs --out-dir /lustre/cms/store/user/<you>/flat_Transformer_v1
+# failed jobs, if any:
+condor_submit cmssw=$CMSSW_BASE jobs=jobs_failed.txt $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub
+```
+
+Outputs: `<out-dir>/<Tau3Mu|DsPhiPi>/<sample>/<sample>_part<k>_fold<f>.root`, one sample per data era
+and stream (`2024eraC_stream0`) or MC sample (`2024_MC_Bd`). `make_flatten_jobs.py` only picks up
+directories of the given tag, and the latest CRAB timestamp of each.
+
 ## Things to check on the first test production
 
 The code has not been compiled here. Before a large production:
