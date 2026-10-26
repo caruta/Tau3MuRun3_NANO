@@ -11,7 +11,7 @@
 // e.g. pair_leg1_m_pi, pair_leg2_dca.
 //
 // Token selection, ordering and truncation follow the ntuple schema:
-//   tracks   : inCone (dR < coneDR to candidate momentum) OR inCylinder (DCA to the PV->SV
+//   tracks   : inCone (dR < coneDR to candidate momentum) OR inCylinder (distance to the PV->SV segment
 //              line < cylDCA, dR < cylMaxDR, 3D IP significance wrt PV > cylMinIPSig); ordered by
 //              3D IP significance wrt the SV
 //   neutrals : inCone (dR < neuConeDR to candidate momentum) OR inFlightCone (dR < neuConeDR
@@ -89,12 +89,21 @@ namespace {
 
   // Distance between the PV->SV line and the straight-line approximation of a track at its
   // point of closest approach to the SV.
-  float lineDistance(const GlobalPoint& pv, const GlobalVector& fdir, const GlobalPoint& p, const GlobalVector& d) {
-    const GlobalVector w = p - pv;
-    const GlobalVector n = fdir.cross(d);
-    if (n.mag() > 1e-9)
-      return std::abs(w.dot(n)) / n.mag();
-    return (w - fdir * w.dot(fdir)).mag();  // parallel lines
+  // Distance between the PV->SV segment and the straight-line approximation of a track (point p,
+  // unit direction d, taken at the track's closest approach to the SV). The flight path is the
+  // segment PV + s*fdir, s in [0, flightLen]: an infinite line would also "meet" unrelated tracks
+  // (e.g. pileup tracks at the same phi) far from the decay region.
+  float segmentDistance(const GlobalPoint& pv, const GlobalVector& fdir, double flightLen,
+                        const GlobalPoint& p, const GlobalVector& d) {
+    const GlobalVector w = pv - p;
+    const double b = fdir.dot(d);           // fdir and d are unit vectors
+    const double denom = 1. - b * b;
+    double s = 0.;                          // parameter of the closest point on the flight line
+    if (denom > 1e-12)
+      s = (b * w.dot(d) - w.dot(fdir)) / denom;
+    s = std::clamp(s, 0., std::max(flightLen, 0.));
+    const GlobalVector x = (pv + fdir * static_cast<float>(s)) - p;  // segment point relative to the track point
+    return (x - d * x.dot(d)).mag();             // its distance to the track line
   }
 
   reco::Vertex vertexFromUserFloats(const pat::CompositeCandidate& c, const std::string& pre, double chi2, double ndof) {
@@ -280,6 +289,7 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
     const GlobalPoint pvPos(pvVtx.x(), pvVtx.y(), pvVtx.z());
     const GlobalPoint svPos(svVtx.x(), svVtx.y(), svVtx.z());
     GlobalVector fdir = svPos - pvPos;
+    const double flightLen = fdir.mag();
     const float fEta = fdir.mag() > 0 ? static_cast<float>(fdir.eta()) : static_cast<float>(cand.eta());
     const float fPhi = fdir.mag() > 0 ? static_cast<float>(fdir.phi()) : static_cast<float>(cand.phi());
     fdir = fdir.mag() > 0 ? fdir.unit() : GlobalVector(cand.px(), cand.py(), cand.pz()).unit();
@@ -366,7 +376,7 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
         if (t.tt.isValid()) {
           const auto tsc = t.tt.trajectoryStateClosestToPoint(svPos);
           if (tsc.isValid())
-            t.dcaFlight = lineDistance(pvPos, fdir, tsc.position(), tsc.momentum().unit());
+            t.dcaFlight = segmentDistance(pvPos, fdir, flightLen, tsc.position(), tsc.momentum().unit());
           const auto ip = IPTools::absoluteImpactParameter3D(t.tt, svVtx);
           if (ip.first) {
             t.ip3dSV = ip.second.value();
@@ -573,8 +583,8 @@ void CandidateContextProducer::produce(edm::StreamID, edm::Event& evt, const edm
   addCol(*trkTab, "dphi", t_dphi, "phi - candidate phi", 10);
   addCol(*trkTab, "dR", t_dR, "dR to candidate momentum", 10);
   addCol(*trkTab, "inCone", t_inCone, "dR < coneDR to candidate momentum");
-  addCol(*trkTab, "inCylinder", t_inCyl, "DCA to PV->SV line < cylDCA, dR < cylMaxDR, 3D IP sig wrt PV > cylMinIPSig");
-  addCol(*trkTab, "dcaFlight", t_dcaFlight, "distance to the PV->SV line [cm]", 10);
+  addCol(*trkTab, "inCylinder", t_inCyl, "distance to PV->SV segment < cylDCA, dR < cylMaxDR, 3D IP sig wrt PV > cylMinIPSig");
+  addCol(*trkTab, "dcaFlight", t_dcaFlight, "distance to the PV->SV segment [cm]", 10);
   addCol(*trkTab, "dxy", t_dxy, "dxy wrt candidate refitted PV [cm]", 10);
   addCol(*trkTab, "dz", t_dz, "dz wrt candidate refitted PV [cm]", 10);
   addCol(*trkTab, "dxyErr", t_dxyErr, "dxy uncertainty [cm]", 10);
