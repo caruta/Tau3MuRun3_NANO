@@ -10,7 +10,8 @@ Outputs then go to <out-dir>/<channel>/<sample>/<sample>_part<k>_fold<f>.root.
 
   python3 make_flatten_jobs.py --base /lustre/cms/store/user/<you> --tag Transformer_v1 --year 2024 \
       --out-dir /lustre/cms/store/user/<you>/flat_Transformer_v1 --work-dir flatten_jobs
-  cd flatten_jobs && condor_submit cmssw=$CMSSW_BASE $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub
+  cd flatten_jobs
+  for f in jobs_part*.txt; do condor_submit cmssw=$CMSSW_BASE jobs=$f $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub; done
 
 If a sample has several CRAB timestamps (a task submitted twice), the latest is used and
 the others are listed; pass --all-timestamps to use them all.
@@ -32,6 +33,8 @@ def main():
     ap.add_argument("--out-dir", required=True, help="where the flattened files go")
     ap.add_argument("--work-dir", default="flatten_jobs", help="where jobs.txt, file lists and logs go")
     ap.add_argument("--files-per-job", type=int, default=50)
+    ap.add_argument("--max-per-submit", type=int, default=1000,
+                    help="jobs per condor_submit (site limit MAX_JOBS_PER_SUBMISSION, see condor_config_val)")
     ap.add_argument("--only", default=None, help="regex on '<channel>/<sample>' to restrict the samples")
     ap.add_argument("--all-timestamps", action="store_true")
     args = ap.parse_args()
@@ -76,11 +79,23 @@ def main():
 
     with open(os.path.join(args.work_dir, "jobs.txt"), "w") as fh:
         fh.write("\n".join(jobs) + "\n")
+    # one list per submission, each within the site limit; jobs.txt keeps the full list for checks
+    for old in glob.glob(os.path.join(args.work_dir, "jobs_part*.txt")):
+        os.remove(old)
+    n_sub = args.max_per_submit
+    parts = [jobs[i : i + n_sub] for i in range(0, len(jobs), n_sub)]
+    for k, part in enumerate(parts):
+        with open(os.path.join(args.work_dir, f"jobs_part{k:03d}.txt"), "w") as fh:
+            fh.write("\n".join(part) + "\n")
 
     print(f"{'channel':8s} {'sample':24s} {'type':5s} {'files':>6s} {'jobs':>5s}")
     for row in summary:
         print(f"{row[0]:8s} {row[1]:24s} {row[2]:5s} {row[3]:6d} {row[4]:5d}")
-    print(f"\n{len(jobs)} jobs written to {os.path.join(args.work_dir, 'jobs.txt')}")
+    print(f"\n{len(jobs)} jobs written to {os.path.join(args.work_dir, 'jobs.txt')}, "
+          f"split into {len(parts)} submissions of at most {n_sub} (jobs_part*.txt). Submit with:")
+    print(f"  cd {os.path.abspath(args.work_dir)}")
+    print("  for f in jobs_part*.txt; do condor_submit cmssw=$CMSSW_BASE jobs=$f "
+          "$CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub; done")
 
 
 if __name__ == "__main__":

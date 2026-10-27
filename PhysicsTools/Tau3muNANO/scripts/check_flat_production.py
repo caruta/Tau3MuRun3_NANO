@@ -2,8 +2,8 @@
 """Check a flattened production made with make_flatten_jobs.py + submit_flatten.sub.
 
 1. Jobs (with --work-dir): finds jobs with no log saying "wrote N candidates" (matched by
-   output prefix, so resubmissions count) and writes them to <work-dir>/jobs_failed.txt:
-       condor_submit cmssw=$CMSSW_BASE jobs=jobs_failed.txt $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub
+   output prefix, so resubmissions count) and writes them to <work-dir>/jobs_failed*.txt
+   (at most 1000 jobs each), with the command to resubmit them.
 2. Content (with --out-dir): per channel/sample, candidates per fold, label fractions (MC)
    and token occupancy before truncation against the CMSSW limits.
 
@@ -33,11 +33,17 @@ def check_jobs(work_dir):
             done[p.group(1)] = int(w.group(1))
     failed = [j for j in jobs if j.split()[2] not in done]
     print(f"jobs: {len(jobs)} total, {len(jobs) - len(failed)} finished, {len(failed)} failed or still running")
+    for stale in glob.glob(os.path.join(work_dir, "jobs_failed*.txt")):
+        os.remove(stale)
     if failed:
-        path = os.path.join(work_dir, "jobs_failed.txt")
-        with open(path, "w") as fh:
-            fh.write("\n".join(failed) + "\n")
-        print(f"  written to {path}; resubmit with: condor_submit cmssw=$CMSSW_BASE jobs=jobs_failed.txt $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub")
+        n_sub = 1000
+        parts = [failed[i : i + n_sub] for i in range(0, len(failed), n_sub)]
+        for k, part in enumerate(parts):
+            with open(os.path.join(work_dir, f"jobs_failed{k:03d}.txt"), "w") as fh:
+                fh.write("\n".join(part) + "\n")
+        print(f"  written to jobs_failed*.txt in {work_dir} ({len(parts)} file(s)); resubmit with:")
+        print("  for f in jobs_failed*.txt; do condor_submit cmssw=$CMSSW_BASE jobs=$f "
+              "$CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub; done")
     return done
 
 

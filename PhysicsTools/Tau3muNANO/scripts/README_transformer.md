@@ -85,12 +85,13 @@ python3 check_dsphipi_peak.py -o ds_2024C.png \
 ```bash
 python3 make_flatten_jobs.py --base /lustre/cms/store/user/<you> --tag Transformer_v1 --year 2024 \
     --out-dir /lustre/cms/store/user/<you>/flat_Transformer_v1 --work-dir ~/flatten_jobs
-cd ~/flatten_jobs && condor_submit cmssw=$CMSSW_BASE $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub
+cd ~/flatten_jobs
+for f in jobs_part*.txt; do condor_submit cmssw=$CMSSW_BASE jobs=$f $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub; done
 # when the jobs are done:
 python3 $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/check_flat_production.py \
     --work-dir ~/flatten_jobs --out-dir /lustre/cms/store/user/<you>/flat_Transformer_v1
 # failed jobs, if any:
-condor_submit cmssw=$CMSSW_BASE jobs=jobs_failed.txt $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub
+for f in jobs_failed*.txt; do condor_submit cmssw=$CMSSW_BASE jobs=$f $CMSSW_BASE/src/PhysicsTools/Tau3muNANO/scripts/submit_flatten.sub; done
 ```
 
 Outputs: `<out-dir>/<Tau3Mu|DsPhiPi>/<sample>/<sample>_part<k>_fold<f>.root`, one sample per data era
