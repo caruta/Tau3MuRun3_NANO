@@ -13,6 +13,7 @@ import argparse
 import glob
 import os
 import re
+import sys
 from collections import defaultdict
 
 import awkward as ak
@@ -23,6 +24,8 @@ LIMITS = {"cand_nTrk_total": 128, "cand_nNeu_total": 32, "cand_nSV_total": 8}
 
 
 def check_jobs(work_dir):
+    if not os.path.isfile(os.path.join(work_dir, "jobs.txt")):
+        sys.exit(f"no jobs.txt in {work_dir}")
     jobs = [l for l in open(os.path.join(work_dir, "jobs.txt")).read().splitlines() if l.strip()]
     done = {}
     for out in glob.glob(os.path.join(work_dir, "logs", "flatten.*.out")):
@@ -48,6 +51,8 @@ def check_jobs(work_dir):
 
 
 def check_content(out_dir):
+    if not os.path.isdir(out_dir):
+        sys.exit(f"output directory not found: {out_dir}")
     for channel in sorted(os.listdir(out_dir)):
         cdir = os.path.join(out_dir, channel)
         if not os.path.isdir(cdir):
@@ -59,6 +64,7 @@ def check_content(out_dir):
             files = sorted(glob.glob(os.path.join(cdir, sample, "*_fold*.root")))
             if not files:
                 continue
+            print(f"  reading {channel}/{sample} ({len(files)} files) ...", file=sys.stderr, flush=True)
             per_fold = np.zeros(5, dtype=np.int64)
             occ = {k: [] for k in LIMITS}
             lab = defaultdict(float)
@@ -92,6 +98,7 @@ def main():
     ap.add_argument("--work-dir", help="directory with jobs.txt and logs/")
     ap.add_argument("--out-dir", help="flattened output directory (<out-dir>/<channel>/<sample>/)")
     args = ap.parse_args()
+    sys.stdout.reconfigure(line_buffering=True)  # show results as they come, also through a pipe
     if not (args.work_dir or args.out_dir):
         ap.error("give --work-dir and/or --out-dir")
     if args.work_dir:
