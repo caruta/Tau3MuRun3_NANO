@@ -6,7 +6,8 @@ tracks, neutrals, IVF secondary vertices, jets) around each candidate. Productio
 
 1. **CMSSW** (`cmsRun test/test_Tau3Mu_cfg.py maxEvents=1000`, or CRAB as before): per-event tables, as usual.
 2. **Flattening** (`scripts/flatten_for_transformer.py`): one row per candidate, jagged token
-   branches, blinding, k-fold split. Its output is what `scripts/weaver_tau3mu.yaml` reads.
+   branches, blinding, k-fold split. Training: `PhysicsTools/Tau3muML` (standalone PyTorch; the weaver
+   config `scripts/weaver_tau3mu.yaml` is kept for reference).
 
 Everything is switched on by default. `setupTau3Mu(process, isMC, transformer=False)` (or the
 same for `setupDsPhiPi`) gives the previous content back, except for the bug fixes and the
