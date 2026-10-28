@@ -184,6 +184,9 @@ def main():
     if os.path.exists(os.path.join(args.out, "stats.json")):
         sys.exit(f"{args.out} already contains a training set; choose another --out")
     os.makedirs(args.out, exist_ok=True)
+    # leftovers of an interrupted run (no stats.json): start clean
+    for d in glob.glob(os.path.join(args.out, "shard_*")) + glob.glob(os.path.join(args.out, "_tmp")):
+        shutil.rmtree(d, ignore_errors=True)
 
     samples = {"signal": list_samples(args.flat_dir, "Tau3Mu", args.signal),
                "background": list_samples(args.flat_dir, "Tau3Mu", args.data)}

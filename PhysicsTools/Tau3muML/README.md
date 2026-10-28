@@ -87,7 +87,7 @@ condor_submit cmssw=$CMSSW_BASE flat=/lustre/cms/store/user/<you>/flat_Transform
 tail -f logs/make_training_set.*.out
 ```
 
-If a run dies half way, delete its `--out` directory before resubmitting.
+If a job dies half way, just resubmit: the leftovers of the interrupted run are removed first.
 
 Copy it to your EOS space (SWAN sees `/eos/user/<initial>/<user>`):
 
