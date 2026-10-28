@@ -139,25 +139,50 @@ python3 -m tau3muml.apply_model --models <OUT> --out-dir scores/ /lustre/.../fla
 
 ## Quick comparison with BDT baselines
 
+**Run 2 BDT inputs** (once per training set, at Bari): the Run 2 three-global-muon BDT variables
+(AN section 11.1, arXiv:2312.02371) for exactly the training-set candidates, read from the flattened
+ntuples. About an hour with 8 processes:
+
+```bash
+mkdir -p ~/bdt_job/logs && cd ~/bdt_job
+condor_submit cmssw=$CMSSW_BASE flat=/lustre/cms/store/user/<you>/flat_Transformer_v1 \
+    trainset=/lustre/cms/store/user/<you>/train_Transformer_v1 \
+    $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_make_bdt_table.sub
+```
+
+It writes `bdt_run2.npz` into the training-set directory; copy it next to the shards on EOS. Variables:
+lowest muon pT, max chi2LocalPosition, max trkKink, min segment compatibility, a muon ID MVA per muon
+(softMvaRun3 instead of the Run 2 global-muon BDT), vertex χ²/ndof, pointing angle, 3D flight
+significance, min/max d0 significance, min DCA of a pT > 1 GeV track to the vertex and the max relative
+track isolation of the muons (both from the track tokens), plus σm/m for the categories.
+
+**Comparison** (SWAN, after the evaluation):
+
 ```bash
 python3 -m tau3muml.compare_bdt --data <DATA> --out <OUT> --bkg-scale 120
 ```
 
-Trains two BDTs per fold on the same candidates, folds and weights as the transformer:
-`bdt_run2like` (~20 candidate-level variables in the spirit of the Run 2 HF BDT; leg variables as
-min/max over the three muons) and `bdt_candmu` (all candidate and muon features of the transformer, no
-context tokens). It then compares them with the transformer's out-of-fold scores (`eval/scores.npz`):
+BDTs trained per fold on the same candidates, folds and weights as the transformer:
 
-- sideband efficiency at fixed signal efficiency, and `compare_roc.png`;
-- the SS3MU SR/SB ratio vs cut, for each method;
-- a rough expected 95 % CL upper limit on the signal yield, with 1 and 2 score categories: counting in
-  1.74–1.82 GeV, background from an exponential fit to the sidebands passing the cut, scaled by
-  `--bkg-scale` (sideband candidates in the full data / in the training set), Asimov approximation.
-  Only the ratio between methods means something.
+| name | inputs | what the comparison shows |
+| --- | --- | --- |
+| `bdt_run2` | Run 2 variables and XGBoost settings (AN table 18); one BDT for all resolution categories | the reference |
+| `bdt_run2like` | ~20 transformer candidate features, no absolute pT | |
+| `bdt_candmu` | all candidate and muon features of the transformer | gain from more candidate information |
+| transformer | + tracks, neutrals, SVs, jets | gain from the context and the architecture |
 
-`bdt_run2like` → `bdt_candmu` shows the gain from more candidate information, `bdt_candmu` →
-`transformer` the gain from the context tokens plus the architecture. Not included: trigger matching,
-analysis base cuts, mass-resolution categories. Results go to `eval/compare_bdt.json`.
+Outputs (printed and in `eval/compare_bdt.json`, `compare_roc.png`): sideband efficiency at fixed signal
+efficiency for all candidates and for three global muons; the SS3MU SR/SB ratio vs cut; and a rough
+expected 95 % CL upper limit on the signal yield, as a ratio to `bdt_run2`:
+
+- `inclusive`: all candidates, 1.74–1.82 GeV, best 2 score categories;
+- `run2_categories`: three global muons, resolution categories A/B/C (σm/m < 0.7 %, < 1.05 %, above) with
+  the Run 2 signal windows, best 3 score categories above a discarded region in each, as in Run 2.
+
+Background in each window: exponential fit to the sidebands passing the cut, times `--bkg-scale`
+(sideband candidates in the full data / in the training set); signal: fraction of the signal MC in the
+window; Asimov approximation. Not included: trigger matching, analysis base cuts, the 2 global + 1
+tracker muon category. Only ratios between methods mean something.
 
 ## Testing without the real ntuples
 

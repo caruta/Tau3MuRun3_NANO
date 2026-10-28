@@ -1,0 +1,15 @@
+# Run 2 BDT inputs for the training-set candidates, as a batch job (inside cmsenv):
+#   mkdir -p logs
+#   condor_submit cmssw=$CMSSW_BASE flat=/lustre/cms/store/user/<you>/flat_Transformer_v1 \
+#       trainset=/lustre/cms/store/user/<you>/train_Transformer_v1 \
+#       $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_make_bdt_table.sub
+executable     = $(cmssw)/src/PhysicsTools/Tau3muML/scripts/run_script.sh
+arguments      = $(cmssw) make_bdt_table.py --train-set $(trainset) --flat-dir $(flat) --jobs 8
+output         = logs/make_bdt_table.$(ClusterId).out
+error          = logs/make_bdt_table.$(ClusterId).err
+log            = logs/make_bdt_table.log
+request_cpus   = 8
+request_memory = 12GB
++MaxRuntime    = 43200
+getenv         = False
+queue

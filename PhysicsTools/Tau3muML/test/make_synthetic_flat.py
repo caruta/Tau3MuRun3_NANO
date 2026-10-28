@@ -41,6 +41,10 @@ def make(rng, n, kind):
     out["cand_mass"] = mass.astype(np.float32)
     out["cand_kin_mass"] = (mass + rng.normal(0, 0.003, n)).astype(np.float32)
     out["cand_kin_ok"] = np.ones(n, np.float32)
+    out["cand_kin_massErr"] = (mass * rng.uniform(0.004, 0.015, n)).astype(np.float32)
+    out["cand_chi2"] = rng.chisquare(3, n).astype(np.float32)
+    out["cand_ndof"] = np.full(n, 3.0, np.float32)
+    out["cand_pointingAngle"] = rng.exponential(0.02 if sig else 0.1, n).astype(np.float32)
     out["cand_charge"] = np.where(kind == "ss", 3, 1) * rng.choice([-1, 1], n)
     out["cand_channel"] = np.full(n, 2 if kind == "ss" else 0, np.int32)
     lsig = rng.exponential(8 if sig else 3, n)
@@ -86,6 +90,7 @@ def make(rng, n, kind):
         "pair_leg1_vprob", "pair_leg2_vprob", "pair_leg3_vprob"]}
     trk["pt"] = jag(rng, nt, lambda m: rng.exponential(1.5, m) + 0.5)
     trk["eta"] = jag(rng, nt, lambda m: rng.uniform(-2.5, 2.5, m))
+    trk["phi"] = jag(rng, nt, lambda m: rng.uniform(-np.pi, np.pi, m))
     trk["deta"] = jag(rng, nt, lambda m: rng.normal(0, 0.5, m))
     trk["dphi"] = jag(rng, nt, lambda m: rng.normal(0, 0.5, m))
     trk["dR"] = np.sqrt(trk["deta"] ** 2 + trk["dphi"] ** 2)
