@@ -22,6 +22,7 @@ import fnmatch
 import glob
 import json
 import os
+import resource
 import shutil
 import sys
 import time
@@ -86,7 +87,7 @@ class ShardWriter:
     """Stage 1: rows go to random shards, buffered and flushed to temporary parts.
     Stage 2: each shard's parts are joined, shuffled and written as .npy arrays."""
 
-    def __init__(self, out, n_shards, rng, flush_rows=200_000):
+    def __init__(self, out, n_shards, rng, flush_rows=50_000):
         self.out, self.n_shards, self.rng, self.flush_rows = out, n_shards, rng, flush_rows
         self.tmp = os.path.join(out, "_tmp")
         os.makedirs(self.tmp, exist_ok=True)
@@ -125,13 +126,12 @@ class ShardWriter:
             os.makedirs(d, exist_ok=True)
             for k, v in cat.items():
                 v = v[perm]
-                if v.dtype == np.float32 and (k == "cand" or k.endswith("_feats")):
-                    v = v.astype(np.float16)
                 np.save(os.path.join(d, f"{k}.npy"), v)
             if seen < stats_rows:
                 accumulate(acc, cat, train_only=cat["role"] != ROLES["ss3mu"])
                 seen += len(cat["label"])
             written += 1
+            del cat, loaded
             for p in parts:
                 os.remove(p)
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -149,11 +149,12 @@ def accumulate(acc, cat, train_only):
             x = x[m]
         else:
             continue
-        x = x.astype(np.float64)
         a = acc.setdefault(k, [0.0, np.zeros(x.shape[-1]), np.zeros(x.shape[-1])])
-        a[0] += len(x)
-        a[1] += x.sum(0)
-        a[2] += (x ** 2).sum(0)
+        for i in range(0, len(x), 200_000):
+            xi = x[i : i + 200_000].astype(np.float64)
+            a[0] += len(xi)
+            a[1] += xi.sum(0)
+            a[2] += (xi ** 2).sum(0)
 
 
 def main():
@@ -172,7 +173,9 @@ def main():
     ap.add_argument("--shard-size", type=int, default=50_000)
     ap.add_argument("--use-activity", action="store_true",
                     help="also use track/neutral/SV counts (pileup dependent, off by default)")
-    ap.add_argument("--step", default="200 MB", help="uproot iterate step")
+    ap.add_argument("--step", type=int, default=20_000, help="candidates read per chunk (memory ~ 30 kB x step)")
+    ap.add_argument("--flush-rows", type=int, default=50_000,
+                    help="rows buffered before writing temporary parts (memory ~ 10 kB x flush-rows)")
     ap.add_argument("--seed", type=int, default=12345)
     args = ap.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
@@ -202,7 +205,7 @@ def main():
 
     targets = {"signal": args.n_signal, "background": args.n_background, "ss3mu": args.n_ss3mu}
     n_shards = max(1, int(round(sum(targets.values()) / args.shard_size)))
-    writer = ShardWriter(args.out, n_shards, rng)
+    writer = ShardWriter(args.out, n_shards, rng, flush_rows=args.flush_rows)
     counts = {}
     for role, target in targets.items():
         target = int(target)
@@ -223,7 +226,7 @@ def main():
                     if not sel.any():
                         continue
                     arr = arr[sel][: target - n]
-                    block = F.compute(arr, names)
+                    block = F.compute(arr, names, dtype=np.float16)
                     block.update({k: v.astype(META_DTYPES[k]) for k, v in meta_arrays(arr, role, sample_ids[sample]).items()})
                     writer.add(block)
                     n += len(arr)
@@ -233,7 +236,8 @@ def main():
             except Exception as e:
                 print(f"  skipping {path}: {type(e).__name__}: {str(e)[:150]}")
             if i % 20 == 0:
-                print(f"{role}: file {i + 1}/{len(files)}, {n}/{target} rows, {time.time() - t0:.0f} s")
+                print(f"{role}: file {i + 1}/{len(files)}, {n}/{target} rows, {time.time() - t0:.0f} s, "
+                      f"max RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6:.1f} GB")
         print(f"{role}: {n} rows from {len(per_sample)} samples: {per_sample}")
         if n < target:
             print(f"  WARNING: only {n} of {target} requested rows available"
@@ -253,7 +257,7 @@ def main():
              "use_activity": args.use_activity, "flat_dir": args.flat_dir, "seed": args.seed}
     with open(os.path.join(args.out, "stats.json"), "w") as fh:
         json.dump(stats, fh, indent=1)
-    print(f"wrote {written} shards to {args.out}")
+    print(f"wrote {written} shards to {args.out}; max RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6:.1f} GB")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,17 @@
+# Build the training set as a batch job (from any directory, inside cmsenv):
+#   mkdir -p logs
+#   condor_submit cmssw=$CMSSW_BASE flat=/lustre/cms/store/user/<you>/flat_Transformer_v1 \
+#       out=/lustre/cms/store/user/<you>/train_Transformer_v1 \
+#       $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_make_training_set.sub
+# Extra options: add  extra="--n-signal 5e5 --n-background 5e5"  to condor_submit.
+extra          =
+executable     = $(cmssw)/src/PhysicsTools/Tau3muML/scripts/run_make_training_set.sh
+arguments      = $(cmssw) --flat-dir $(flat) --out $(out) $(extra)
+output         = logs/make_training_set.$(ClusterId).out
+error          = logs/make_training_set.$(ClusterId).err
+log            = logs/make_training_set.log
+request_cpus   = 1
+request_memory = 8GB
++MaxRuntime    = 172800
+getenv         = False
+queue

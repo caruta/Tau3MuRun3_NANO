@@ -74,7 +74,20 @@ python3 scripts/make_training_set.py \
 Defaults: 1 M signal, 1 M sideband and 0.2 M SS3MU candidates; data files are read in random order and
 20 % of each file's candidates kept (`--row-frac-data`), so all eras and streams contribute. If a role
 has fewer candidates than requested, the script says so. About 10 kB per candidate, so ≈ 22 GB for the
-defaults; run it as a batch job if the interactive node limits time or memory (≈ 3 GB RAM).
+defaults. Peak memory is ≈ 2–3 GB (printed as "max RSS"; `--step` and `--flush-rows` lower it).
+
+It takes hours (it reads ≈ 5 M data candidates), longer than interactive nodes allow, so run it as an
+HTCondor job:
+
+```bash
+mkdir -p ~/trainset_job/logs && cd ~/trainset_job
+condor_submit cmssw=$CMSSW_BASE flat=/lustre/cms/store/user/<you>/flat_Transformer_v1 \
+    out=/lustre/cms/store/user/<you>/train_Transformer_v1 \
+    $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_make_training_set.sub
+tail -f logs/make_training_set.*.out
+```
+
+If a run dies half way, delete its `--out` directory before resubmitting.
 
 Copy it to your EOS space (SWAN sees `/eos/user/<initial>/<user>`):
 

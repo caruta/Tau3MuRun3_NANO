@@ -263,22 +263,31 @@ def geom_index(feature_names):
     return {t: [names.index(g) for g in GEOM[t]] for t, names in feature_names["tokens"].items()}
 
 
-def compute(r, feature_names):
+def compute(r, feature_names, dtype=np.float32):
     """Feature arrays for a chunk of flattened candidates.
 
     r: awkward record array (one entry per candidate) with the flattened branches.
     Returns dict: cand [N,Fc]; for each token type t: t_feats [N,n,F] (zero for padding), t_mask [N,n].
+    Columns are filled one at a time into preallocated arrays of `dtype`, so the peak memory is
+    about one output array plus one padded column.
     """
-    out = {"cand": np.stack([ak.to_numpy(CAND_FEATURES[k](r)).astype(np.float32) for k in feature_names["cand"]], axis=1)}
+    N = len(r)
+    cand = np.zeros((N, len(feature_names["cand"])), dtype=dtype)
+    for i, k in enumerate(feature_names["cand"]):
+        cand[:, i] = np.nan_to_num(ak.to_numpy(CAND_FEATURES[k](r)).astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    out = {"cand": cand}
     for t, names in feature_names["tokens"].items():
         n = feature_names["token_max"][t]
         counts = ak.to_numpy(ak.num(r[f"{t}_eta"] if f"{t}_eta" in r.fields else r[f"{t}_pt"], axis=1))
         mask = np.arange(n)[None, :] < np.minimum(counts, n)[:, None]
-        feats = np.stack([_pad(TOKEN_FEATURES[t][k](r), n) for k in names], axis=2)
-        feats[~np.isfinite(feats)] = 0.0
-        out[f"{t}_feats"] = feats * mask[:, :, None]
+        feats = np.zeros((N, n, len(names)), dtype=dtype)
+        for i, k in enumerate(names):
+            col = _pad(TOKEN_FEATURES[t][k](r), n)
+            col[~np.isfinite(col) | ~mask] = 0.0
+            feats[:, :, i] = col
+            del col
+        out[f"{t}_feats"] = feats
         out[f"{t}_mask"] = mask
-    out["cand"][~np.isfinite(out["cand"])] = 0.0
     return out
 
 
