@@ -137,6 +137,28 @@ Scores for any flattened file (friend tree with `run`, `event`, `cand_idx`, `sco
 python3 -m tau3muml.apply_model --models <OUT> --out-dir scores/ /lustre/.../flat_Transformer_v1/Tau3Mu/2024eraC_stream0/*.root
 ```
 
+## Quick comparison with BDT baselines
+
+```bash
+python3 -m tau3muml.compare_bdt --data <DATA> --out <OUT> --bkg-scale 120
+```
+
+Trains two BDTs per fold on the same candidates, folds and weights as the transformer:
+`bdt_run2like` (~20 candidate-level variables in the spirit of the Run 2 HF BDT; leg variables as
+min/max over the three muons) and `bdt_candmu` (all candidate and muon features of the transformer, no
+context tokens). It then compares them with the transformer's out-of-fold scores (`eval/scores.npz`):
+
+- sideband efficiency at fixed signal efficiency, and `compare_roc.png`;
+- the SS3MU SR/SB ratio vs cut, for each method;
+- a rough expected 95 % CL upper limit on the signal yield, with 1 and 2 score categories: counting in
+  1.74–1.82 GeV, background from an exponential fit to the sidebands passing the cut, scaled by
+  `--bkg-scale` (sideband candidates in the full data / in the training set), Asimov approximation.
+  Only the ratio between methods means something.
+
+`bdt_run2like` → `bdt_candmu` shows the gain from more candidate information, `bdt_candmu` →
+`transformer` the gain from the context tokens plus the architecture. Not included: trigger matching,
+analysis base cuts, mass-resolution categories. Results go to `eval/compare_bdt.json`.
+
 ## Testing without the real ntuples
 
 ```bash
