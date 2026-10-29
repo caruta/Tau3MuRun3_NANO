@@ -264,6 +264,23 @@ def expected_limits(score, meta, w, extra, bkg_scale, n_grid=25):
     return out
 
 
+def sideband_near_far(score, meta, effs=(1.0, 0.1, 0.01, 0.001)):
+    """Sidebands near the SR (1.70-1.74, 1.82-1.86 GeV) over far (1.50-1.62, 1.94-2.06 GeV) above cuts
+    at fixed sideband efficiency. A rise with tighter cuts: sculpting, or a background that peaks near
+    the SR at high score; if the BDTs show the same rise at the same efficiency, it is the background."""
+    b = meta["role"] == 1
+    m = meta["mass"]
+    near = b & (((m >= 1.70) & (m < 1.74)) | ((m >= 1.82) & (m < 1.86)))
+    far = b & (((m >= 1.50) & (m < 1.62)) | ((m >= 1.94) & (m < 2.06)))
+    out = {}
+    for e in effs:
+        cut = -np.inf if e >= 1 else np.quantile(score[b], 1 - e)
+        n, f = int((near & (score >= cut)).sum()), int((far & (score >= cut)).sum())
+        r = n / f if f else float("nan")
+        out[f"{e:g}"] = dict(near=n, far=f, ratio=r, err=r * np.sqrt(1 / max(n, 1) + 1 / max(f, 1)) if f else float("nan"))
+    return out
+
+
 def ss3mu_ratio(score, meta, w, effs=(1.0, 0.5, 0.2)):
     tb = np.isin(meta["role"], [0, 1])
     ss = meta["role"] == 2
@@ -330,6 +347,7 @@ def compare(data_dir, out_dir, bkg_scale, folds=range(5), plots=True):
         r = {"bkg_eff": {sub: {f"{e:.1f}": bkg_eff_at(s[tb & m], y[tb & m], w[tb & m], e)
                                for e in (0.8, 0.6, 0.5, 0.3, 0.2, 0.1)} for sub, m in subsets.items()},
              "ss3mu_SR_over_SB": ss3mu_ratio(s, meta, w),
+             "sideband_near_far": sideband_near_far(s, meta),
              "expected_ul": expected_limits(s, meta, w, extra, bkg_scale)}
         if name in info:
             r.update(n_inputs=info[name]["n_inputs"], trainer=info[name]["trainer"])
@@ -365,6 +383,10 @@ def print_table(res, subsets):
     for e in ("1.0", "0.5", "0.2"):
         print(f"{e:>8s} " + " ".join(f"{res['methods'][m]['ss3mu_SR_over_SB'][e]['ratio']:6.3f}±"
                                     f"{res['methods'][m]['ss3mu_SR_over_SB'][e]['err']:<6.3f}" for m in meth))
+    print("\nsidebands near/far the SR at fixed sideband efficiency (constant = no sculpting)")
+    for e in ("1", "0.1", "0.01", "0.001"):
+        print(f"{e:>8s} " + " ".join(f"{res['methods'][m]['sideband_near_far'][e]['ratio']:6.3f}±"
+                                    f"{res['methods'][m]['sideband_near_far'][e]['err']:<6.3f}" for m in meth))
     print(f"\nexpected 95% CL UL on the signal yield, ratio to {res['reference']} (lower is better)")
     for c in res["methods"][meth[0]]["expected_ul"]:
         print(f"{c:>16s} " + " ".join(f"{res['methods'][m]['expected_ul'][c]['ratio']:13.3f}" for m in meth))
