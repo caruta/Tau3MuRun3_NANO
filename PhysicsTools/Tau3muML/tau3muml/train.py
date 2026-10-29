@@ -25,7 +25,7 @@ import torch
 from . import data as D
 from .model import build
 
-DEFAULTS = dict(epochs=20, batch_size=256, lr=5e-4, weight_decay=0.01, warmup_frac=0.03, disco=2.0, disco_on="score",
+DEFAULTS = dict(epochs=20, batch_size=256, lr=5e-4, weight_decay=0.01, warmup_frac=0.03, disco=2.0, disco_on="score", disco_run=0.0,
                 drop=None, drop_tokens=None,
                 d=128, heads=8, layers=6, ff=4, dropout=0.1, pair_bias=True, amp=True,
                 prod_frac=None, npv_reweight=True, val_rows=200_000, max_train_rows=None, seed=1,
@@ -151,6 +151,7 @@ def train(data_dir, out_dir, fold, **cfg):
             y = torch.from_numpy(meta_b["label"].astype(np.float32)).to(device)
             wt = torch.from_numpy(w).to(device)
             mass = torch.from_numpy(meta_b["mass"].astype(np.float32)).to(device)
+            runv = torch.from_numpy(meta_b["run"].astype(np.float32)).to(device)
             with torch.autocast(device.type, dtype=torch.float16, enabled=use_amp):
                 logit = model(xb)
             logit = logit.float()
@@ -159,6 +160,9 @@ def train(data_dir, out_dir, fold, **cfg):
             dvar = logit[bk] if c["disco_on"] == "logit" else torch.sigmoid(logit[bk])
             dc = distance_corr(dvar, mass[bk], wt[bk]) if bk.sum() > 8 else torch.zeros((), device=device)
             loss = bce + c["disco"] * dc
+            if c["disco_run"] > 0 and bk.sum() > 8:
+                # background score independent of the data-taking period (detector conditions change during the year)
+                loss = loss + c["disco_run"] * distance_corr(dvar, runv[bk], wt[bk])
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
@@ -189,10 +193,13 @@ def train(data_dir, out_dir, fold, **cfg):
         far = b & (((mb >= 1.50) & (mb < 1.62)) | ((mb >= 1.94) & (mb < 2.06)))
         top = s >= np.quantile(s[b], 0.99) if b.any() else np.zeros_like(b)
         v_nf = ((near & top).sum() / max((far & top).sum(), 1)) / max(near.sum() / max(far.sum(), 1), 1e-9)
+        early, late = b & (m["run"] < 383000), b & (m["run"] >= 383000)
+        v_el = ((top & early).sum() / early.sum()) / max((top & late).sum() / late.sum(), 1e-9) \
+            if early.any() and late.any() else float("nan")
         vloss = vbce + c["disco"] * vdc
         row = dict(epoch=epoch, lr=sched.get_last_lr()[0], train_loss=tr[0], train_bce=tr[1], train_disco=tr[2],
                    val_loss=vloss, val_bce=vbce, val_disco=vdc, val_auc=weighted_auc(s, y, w),
-                   val_bkgeff_sig50=bkg_eff_at(s, y, w, 0.5), val_bkgeff_sig20=bkg_eff_at(s, y, w, 0.2), val_near_far=float(v_nf),
+                   val_bkgeff_sig50=bkg_eff_at(s, y, w, 0.5), val_bkgeff_sig20=bkg_eff_at(s, y, w, 0.2), val_near_far=float(v_nf), val_early_late=float(v_el),
                    time_s=time.time() - t0)
         print("  " + ", ".join(f"{k} {v:.4g}" if isinstance(v, float) else f"{k} {v}" for k, v in row.items()), flush=True)
         with open(metrics_path, "a", newline="") as fh:
