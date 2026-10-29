@@ -331,6 +331,11 @@ def compare(data_dir, out_dir, bkg_scale, folds=range(5), plots=True):
         print(f"no {path}: run tau3muml.evaluate first to include the transformer")
 
     have = np.all([np.isfinite(v) for v in scores.values()], axis=0)
+    # --bkg-scale is full data / training set; if only some folds are scored, scale up accordingly
+    n_bkg_all = int((meta["role"] == 1).sum())
+    n_bkg_used = int(((meta["role"] == 1) & have).sum())
+    bkg_scale_eff = bkg_scale * n_bkg_all / max(n_bkg_used, 1)
+    print(f"background scale: {bkg_scale} x {n_bkg_all}/{n_bkg_used} sideband candidates used = {bkg_scale_eff:.0f}")
     meta = {k: v[have] for k, v in meta.items()}
     extra = {k: v[have] for k, v in extra.items()}
     scores = {k: v[have] for k, v in scores.items()}
@@ -342,13 +347,13 @@ def compare(data_dir, out_dir, bkg_scale, folds=range(5), plots=True):
         subsets["3glb"] = extra["is3glb"]
 
     res = {"n": {r: int((meta["role"] == i).sum()) for i, r in enumerate(["signal", "sidebands", "ss3mu"])},
-           "bkg_scale": bkg_scale, "methods": {}}
+           "bkg_scale": bkg_scale_eff, "methods": {}}
     for name, s in scores.items():
         r = {"bkg_eff": {sub: {f"{e:.1f}": bkg_eff_at(s[tb & m], y[tb & m], w[tb & m], e)
                                for e in (0.8, 0.6, 0.5, 0.3, 0.2, 0.1)} for sub, m in subsets.items()},
              "ss3mu_SR_over_SB": ss3mu_ratio(s, meta, w),
              "sideband_near_far": sideband_near_far(s, meta),
-             "expected_ul": expected_limits(s, meta, w, extra, bkg_scale)}
+             "expected_ul": expected_limits(s, meta, w, extra, bkg_scale_eff)}
         if name in info:
             r.update(n_inputs=info[name]["n_inputs"], trainer=info[name]["trainer"])
         res["methods"][name] = r
@@ -368,6 +373,7 @@ def compare(data_dir, out_dir, bkg_scale, folds=range(5), plots=True):
     print_table(res, list(subsets))
     if plots:
         make_plots(scores, meta, w, subsets, ev)
+        plot_fits(scores, meta, w, res, ev)
     return res
 
 
@@ -390,6 +396,50 @@ def print_table(res, subsets):
     print(f"\nexpected 95% CL UL on the signal yield, ratio to {res['reference']} (lower is better)")
     for c in res["methods"][meth[0]]["expected_ul"]:
         print(f"{c:>16s} " + " ".join(f"{res['methods'][m]['expected_ul'][c]['ratio']:13.3f}" for m in meth))
+
+
+def plot_fits(scores, meta, w, res, ev):
+    """Sideband mass and exponential fit in each inclusive score category, per method: fits_<method>.png"""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    sig, bkg = meta["role"] == 0, meta["role"] == 1
+    m = meta["mass"]
+    pieces = [(1.40, BLIND[0]), (BLIND[1], 2.20)]
+    bins = np.linspace(1.40, 2.20, 41)
+    bw = bins[1] - bins[0]
+    c = 0.5 * (bins[1:] + bins[:-1])
+    for name, s in scores.items():
+        cuts = res["methods"][name]["expected_ul"]["inclusive"]["cuts"] + [np.inf]
+        fig, axs = plt.subplots(1, len(cuts) - 1, figsize=(6.5 * (len(cuts) - 1), 5), squeeze=False)
+        for k, ax in enumerate(axs[0]):
+            sb = bkg & (s >= cuts[k]) & (s < cuts[k + 1])
+            sg = sig & (s >= cuts[k]) & (s < cuts[k + 1])
+            mm = m[sb]
+            mm = mm[(mm >= 1.40) & (mm <= 2.20) & ((mm < BLIND[0]) | (mm >= BLIND[1]))]
+            h, _ = np.histogram(mm, bins)
+            ok = (c < BLIND[0]) | (c > BLIND[1])
+            ax.errorbar(c[ok], h[ok], yerr=np.sqrt(h[ok]), fmt="o", color="k", ms=4, label=f"sidebands ({len(mm)})")
+            xx = np.linspace(1.40, 2.20, 300)
+            if len(mm) >= 3:
+                lam = np.linspace(-10, 10, 1001)
+                norm = sum(_integ(lam, a, b) for a, b in pieces)
+                best = lam[np.argmax(lam * mm.sum() - len(mm) * np.log(norm))]
+                ax.plot(xx, len(mm) * bw * np.exp(best * xx) / sum(_integ(best, a, b) for a, b in pieces), "r-",
+                        label=f"exponential, slope {best:.1f}/GeV")
+            ax.axvspan(*BLIND, color="grey", alpha=0.2, label=f"SR: {exp_fit(m[sb], (1.40, 2.20), BLIND, [BLIND]):.2f} expected")
+            hs, _ = np.histogram(m[sg], bins, weights=w[sg])
+            if hs.max() > 0:
+                ax.step(bins[:-1], hs / hs.max() * max(h.max(), 3) * 0.9, where="post", color="b", label="signal MC (shape)")
+            hi = "" if not np.isfinite(cuts[k + 1]) else f" < {cuts[k + 1]:.5f}"
+            ax.set_title(f"{name}: {cuts[k]:.5f} <= score{hi}", fontsize=11)
+            ax.set_xlabel("m(3mu) [GeV]")
+            ax.set_ylim(0, max(h.max(), 3) * 1.6)
+            ax.legend(fontsize=8)
+        fig.tight_layout()
+        fig.savefig(os.path.join(ev, f"fits_{name}.png"), dpi=120)
+        plt.close(fig)
 
 
 def make_plots(scores, meta, w, subsets, ev):
