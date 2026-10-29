@@ -25,7 +25,8 @@ import torch
 from . import data as D
 from .model import build
 
-DEFAULTS = dict(epochs=20, batch_size=256, lr=5e-4, weight_decay=0.01, warmup_frac=0.03, disco=2.0,
+DEFAULTS = dict(epochs=20, batch_size=256, lr=5e-4, weight_decay=0.01, warmup_frac=0.03, disco=2.0, disco_on="score",
+                drop=None, drop_tokens=None,
                 d=128, heads=8, layers=6, ff=4, dropout=0.1, pair_bias=True, amp=True,
                 prod_frac=None, npv_reweight=True, val_rows=200_000, max_train_rows=None, seed=1,
                 num_threads=None, grad_clip=1.0)
@@ -107,7 +108,7 @@ def train(data_dir, out_dir, fold, **cfg):
           f"val fold {va_f}, test fold {te_f}; device {device}")
 
     model = build(stats, d=c["d"], heads=c["heads"], layers=c["layers"], ff=c["ff"], dropout=c["dropout"],
-                  pair_bias=c["pair_bias"]).to(device)
+                  pair_bias=c["pair_bias"], drop=c["drop"] or (), drop_tokens=c["drop_tokens"] or ()).to(device)
     print(f"model parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M")
     decay = [p for n, p in model.named_parameters() if p.ndim >= 2 and "type_embed" not in n]
     no_decay = [p for n, p in model.named_parameters() if not (p.ndim >= 2 and "type_embed" not in n)]
@@ -155,7 +156,8 @@ def train(data_dir, out_dir, fold, **cfg):
             logit = logit.float()
             bce = (torch.nn.functional.binary_cross_entropy_with_logits(logit, y, reduction="none") * wt).sum() / wt.sum()
             bk = (y == 0) & (wt > 0)
-            dc = distance_corr(torch.sigmoid(logit[bk]), mass[bk], wt[bk]) if bk.sum() > 8 else torch.zeros((), device=device)
+            dvar = logit[bk] if c["disco_on"] == "logit" else torch.sigmoid(logit[bk])
+            dc = distance_corr(dvar, mass[bk], wt[bk]) if bk.sum() > 8 else torch.zeros((), device=device)
             loss = bce + c["disco"] * dc
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
@@ -178,12 +180,19 @@ def train(data_dir, out_dir, fold, **cfg):
         b = y == 0
         nb_dc = min(int(b.sum()), 5000)
         sel = np.nonzero(b)[0][:nb_dc]
-        vdc = float(distance_corr(torch.from_numpy(s[sel]).double(), torch.from_numpy(m["mass"][sel]).double(),
+        sv = np.log(np.clip(s, 1e-7, 1 - 1e-7) / (1 - np.clip(s, 1e-7, 1 - 1e-7))) if c["disco_on"] == "logit" else s
+        vdc = float(distance_corr(torch.from_numpy(sv[sel]).double(), torch.from_numpy(m["mass"][sel]).double(),
                                   torch.from_numpy(w[sel]).double())) if nb_dc > 8 else float("nan")
+        # sculpting: (1.70-1.74, 1.82-1.86) / (1.50-1.62, 1.94-2.06) GeV for the top 1 % sidebands vs all
+        mb = m["mass"]
+        near = b & (((mb >= 1.70) & (mb < 1.74)) | ((mb >= 1.82) & (mb < 1.86)))
+        far = b & (((mb >= 1.50) & (mb < 1.62)) | ((mb >= 1.94) & (mb < 2.06)))
+        top = s >= np.quantile(s[b], 0.99) if b.any() else np.zeros_like(b)
+        v_nf = ((near & top).sum() / max((far & top).sum(), 1)) / max(near.sum() / max(far.sum(), 1), 1e-9)
         vloss = vbce + c["disco"] * vdc
         row = dict(epoch=epoch, lr=sched.get_last_lr()[0], train_loss=tr[0], train_bce=tr[1], train_disco=tr[2],
                    val_loss=vloss, val_bce=vbce, val_disco=vdc, val_auc=weighted_auc(s, y, w),
-                   val_bkgeff_sig50=bkg_eff_at(s, y, w, 0.5), val_bkgeff_sig20=bkg_eff_at(s, y, w, 0.2),
+                   val_bkgeff_sig50=bkg_eff_at(s, y, w, 0.5), val_bkgeff_sig20=bkg_eff_at(s, y, w, 0.2), val_near_far=float(v_nf),
                    time_s=time.time() - t0)
         print("  " + ", ".join(f"{k} {v:.4g}" if isinstance(v, float) else f"{k} {v}" for k, v in row.items()), flush=True)
         with open(metrics_path, "a", newline="") as fh:
@@ -218,7 +227,11 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--fold", type=int, nargs="+", default=[0])
     for k, v in DEFAULTS.items():
-        if k == "prod_frac":
+        if k in ("drop", "drop_tokens"):
+            ap.add_argument(f"--{k.replace('_', '-')}", nargs="+", default=None)
+        elif k == "disco_on":
+            ap.add_argument("--disco-on", choices=["score", "logit"], default=v)
+        elif k == "prod_frac":
             ap.add_argument("--prod-frac", default=None,
                             help='JSON, e.g. \'{"1": 0.7, "2": 0.1, "3": 0.2}\' (1 Ds, 2 B->Ds, 3 B->tau, 4 D+, 5 W)')
         elif isinstance(v, bool):

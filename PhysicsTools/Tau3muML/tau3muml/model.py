@@ -72,12 +72,23 @@ class Block(nn.Module):
 
 
 class Tau3MuTransformer(nn.Module):
-    def __init__(self, stats, d=128, heads=8, layers=6, ff=4, dropout=0.1, pair_bias=True):
+    def __init__(self, stats, d=128, heads=8, layers=6, ff=4, dropout=0.1, pair_bias=True, drop=(), drop_tokens=()):
+        """drop: inputs to ignore, as "cand:<name>" or "<token>:<name>" (set to their mean, and to 0 in
+        the pair features); drop_tokens: token types left out entirely (e.g. ["trk", "neu", "sv", "jet"])."""
         super().__init__()
         feats = stats["features"]
-        self.tokens = [t for t in TOKEN_ORDER if t in feats["tokens"]]
+        self.tokens = [t for t in TOKEN_ORDER if t in feats["tokens"] and t not in drop_tokens]
         self.geom_index = feats["geom_index"]
-        self.config = dict(d=d, heads=heads, layers=layers, ff=ff, dropout=dropout, pair_bias=pair_bias)
+        self.config = dict(d=d, heads=heads, layers=layers, ff=ff, dropout=dropout, pair_bias=pair_bias,
+                           drop=list(drop), drop_tokens=list(drop_tokens))
+        unknown = [k for k in drop if k.split(":")[0] not in ["cand"] + list(feats["tokens"])
+                   or k.split(":")[1] not in (feats["cand"] if k.startswith("cand:") else feats["tokens"][k.split(":")[0]])]
+        if unknown:
+            raise ValueError(f"unknown inputs in drop: {unknown}")
+
+        def keep(name, names):
+            k = torch.tensor([0.0 if f"{name}:{n}" in drop else 1.0 for n in names])
+            self.register_buffer(f"{name}_keep", k, persistent=False)
         norm = stats["norm"]
 
         def buf(name, key, n):
@@ -88,11 +99,13 @@ class Tau3MuTransformer(nn.Module):
 
         n_cand = len(feats["cand"])
         buf("cand", "cand", n_cand)
+        keep("cand", feats["cand"])
         self.cand_embed = Embed(n_cand, d, dropout)
         self.embed = nn.ModuleDict()
         for t in self.tokens:
             n = len(feats["tokens"][t])
             buf(t, f"{t}_feats", n)
+            keep(t, feats["tokens"][t])
             self.embed[t] = Embed(n, d, dropout)
         self.type_embed = nn.Parameter(torch.zeros(len(self.tokens) + 1, d))
         nn.init.normal_(self.type_embed, std=0.02)
@@ -102,7 +115,7 @@ class Tau3MuTransformer(nn.Module):
         self.head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Dropout(dropout), nn.Linear(d, 1))
 
     def _norm(self, name, x):
-        return (x - getattr(self, f"{name}_mean")) / getattr(self, f"{name}_std")
+        return (x - getattr(self, f"{name}_mean")) / getattr(self, f"{name}_std") * getattr(self, f"{name}_keep")
 
     def forward(self, batch):
         cand = self._norm("cand", batch["cand"].float())
@@ -116,7 +129,7 @@ class Tau3MuTransformer(nn.Module):
             x = self.embed[t](self._norm(t, raw)) + self.type_embed[i + 1]
             xs.append(x * m[..., None])
             masks.append(m)
-            geoms.append(raw[..., self.geom_index[t]] * m[..., None])
+            geoms.append(raw[..., self.geom_index[t]] * getattr(self, f"{t}_keep")[self.geom_index[t]] * m[..., None])
         x = torch.cat(xs, 1)
         valid = torch.cat(masks, 1)
         H = self.config["heads"]

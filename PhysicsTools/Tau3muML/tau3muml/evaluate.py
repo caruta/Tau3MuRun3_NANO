@@ -55,6 +55,25 @@ def in_range(m, lo, hi):
     return (m >= lo) & (m < hi)
 
 
+def sideband_sculpting(r, early_run=383000):
+    """Sidebands: (1.70-1.74 + 1.82-1.86) / (1.50-1.62 + 1.94-2.06) GeV above score cuts at fixed
+    sideband efficiency (constant = no sculpting), and the efficiency of those cuts in early vs late runs."""
+    b = r["role"] == 1
+    m, s = r["mass"], r["score"]
+    near = b & (((m >= 1.70) & (m < 1.74)) | ((m >= 1.82) & (m < 1.86)))
+    far = b & (((m >= 1.50) & (m < 1.62)) | ((m >= 1.94) & (m < 2.06)))
+    early, late = b & (r["run"] < early_run), b & (r["run"] >= early_run)
+    out = {}
+    for eff in (1.0, 0.1, 0.01, 0.001):
+        cut = -1.0 if eff >= 1 else float(np.quantile(s[b], 1 - eff))
+        n_n, n_f = int((near & (s >= cut)).sum()), int((far & (s >= cut)).sum())
+        ratio = n_n / n_f if n_f else float("nan")
+        out[f"bkg_eff_{eff:g}"] = dict(cut=cut, near=n_n, far=n_f, near_over_far=ratio,
+                                       err=ratio * np.sqrt(1 / max(n_n, 1) + 1 / max(n_f, 1)) if n_f else float("nan"),
+                                       eff_early_over_late=float((s[early] >= cut).mean() / max((s[late] >= cut).mean(), 1e-12)))
+    return out
+
+
 def sculpting_numbers(r):
     """SR/SB ratio of SS3MU before and after score cuts (should stay constant)."""
     sig = r["role"] == 0
@@ -151,6 +170,7 @@ def evaluate(data_dir, out_dir, which="best.pt", plots=True):
                "per_fold_auc": {int(k): weighted_auc(r["score"][tb & (r["model_fold"] == k)], r["label"][tb & (r["model_fold"] == k)],
                                                      r["weight"][tb & (r["model_fold"] == k)]) for k in np.unique(r["model_fold"])},
                "ss3mu_SR_over_SB": sculpting_numbers(r),
+               "sideband_sculpting": sideband_sculpting(r),
                "n": {"signal": int((r["role"] == 0).sum()), "sidebands": int((r["role"] == 1).sum()),
                      "ss3mu": int((r["role"] == 2).sum())}}
     with open(os.path.join(ev, "summary.json"), "w") as fh:
