@@ -114,6 +114,35 @@ class Tau3MuTransformer(nn.Module):
         self.ln = nn.LayerNorm(d)
         self.head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Dropout(dropout), nn.Linear(d, 1))
 
+    @torch.no_grad()
+    def check_drop(self, device, n=4, length=8):
+        """Self-test: changing the ignored inputs must not change the output."""
+        if not self.config["drop"]:
+            return
+        was = self.training
+        self.eval()
+        g = torch.Generator().manual_seed(0)
+
+        def batch():
+            b = {"cand": torch.randn(n, self.cand_mean.numel(), generator=g)}
+            for t in self.tokens:
+                b[f"{t}_feats"] = torch.randn(n, length, getattr(self, f"{t}_mean").numel(), generator=g)
+                b[f"{t}_mask"] = torch.ones(n, length, dtype=torch.bool)
+            return {k: v.to(device) for k, v in b.items()}
+
+        x = batch()
+        y = {k: v.clone() for k, v in x.items()}
+        for name in ["cand"] + self.tokens:
+            keep = getattr(self, f"{name}_keep")
+            key = "cand" if name == "cand" else f"{name}_feats"
+            noise = torch.randn(y[key].shape, generator=g).to(device) * 5
+            y[key] = torch.where(keep.bool(), y[key], y[key] + noise)
+        d = (self(x) - self(y)).abs().max().item()
+        self.train(was)
+        if d > 1e-4:
+            raise RuntimeError(f"ignored inputs still change the output (max difference {d:.3g})")
+        print(f"check: the {len(self.config['drop'])} ignored inputs do not affect the output")
+
     def _norm(self, name, x):
         return (x - getattr(self, f"{name}_mean")) / getattr(self, f"{name}_std") * getattr(self, f"{name}_keep")
 

@@ -86,6 +86,9 @@ def predict_loader(model, loader, device, amp=True):
 
 
 def train(data_dir, out_dir, fold, **cfg):
+    unknown = sorted(set(cfg) - set(DEFAULTS))
+    if unknown:
+        raise ValueError(f"unknown options {unknown}; known: {sorted(DEFAULTS)}")
     c = dict(DEFAULTS)
     c.update({k: v for k, v in cfg.items() if v is not None})
     if c["num_threads"]:
@@ -94,8 +97,6 @@ def train(data_dir, out_dir, fold, **cfg):
     device = device_of()
     run_dir = os.path.join(out_dir, f"fold{fold}")
     os.makedirs(run_dir, exist_ok=True)
-    with open(os.path.join(run_dir, "config.json"), "w") as fh:
-        json.dump({**c, "data_dir": data_dir, "fold": fold}, fh, indent=1)
 
     stats = D.load_stats(data_dir)
     meta = D.load_meta(data_dir)
@@ -110,6 +111,8 @@ def train(data_dir, out_dir, fold, **cfg):
     model = build(stats, d=c["d"], heads=c["heads"], layers=c["layers"], ff=c["ff"], dropout=c["dropout"],
                   pair_bias=c["pair_bias"], drop=c["drop"] or (), drop_tokens=c["drop_tokens"] or ()).to(device)
     print(f"model parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f} M")
+    print(f"ignored inputs: {model.config['drop'] or 'none'}; left-out token types: {model.config['drop_tokens'] or 'none'}")
+    model.check_drop(device)
     decay = [p for n, p in model.named_parameters() if p.ndim >= 2 and "type_embed" not in n]
     no_decay = [p for n, p in model.named_parameters() if not (p.ndim >= 2 and "type_embed" not in n)]
     opt = torch.optim.AdamW([{"params": decay, "weight_decay": c["weight_decay"]},
@@ -126,6 +129,10 @@ def train(data_dir, out_dir, fold, **cfg):
     last = os.path.join(run_dir, "last.pt")
     if os.path.exists(last):
         ck = torch.load(last, map_location=device, weights_only=False)
+        diff = {k: (ck["config"].get(k), v) for k, v in model.config.items() if ck["config"].get(k) != v}
+        if diff:
+            raise RuntimeError(f"{run_dir} holds a model trained with other settings {{name: (saved, requested)}}: "
+                               f"{diff}. Use a new output directory, or remove {last} to start over.")
         model.load_state_dict(ck["model"])
         opt.load_state_dict(ck["opt"])
         sched.load_state_dict(ck["sched"])
@@ -135,6 +142,8 @@ def train(data_dir, out_dir, fold, **cfg):
     if start_epoch >= c["epochs"]:
         print("training already finished")
         return run_dir
+    with open(os.path.join(run_dir, "config.json"), "w") as fh:
+        json.dump({**c, "data_dir": data_dir, "fold": fold}, fh, indent=1)
 
     val_loader = D.ShardLoader(data_dir, va_f, roles=(0, 1), batch_size=1024, shuffle=False, weighter=weighter,
                                max_rows=c["val_rows"])
