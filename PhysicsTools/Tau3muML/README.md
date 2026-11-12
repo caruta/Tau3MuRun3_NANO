@@ -184,6 +184,39 @@ Background in each window: exponential fit to the sidebands passing the cut, tim
 window; Asimov approximation. Not included: trigger matching, analysis base cuts, the 2 global + 1
 tracker muon category. Only ratios between methods mean something.
 
+## Comparison after the analysis base cuts, one candidate per event
+
+No retraining: the scores of `compare_bdt` are reused on an analysis-like subset.
+
+1. At Bari, inside cmsenv (about an hour): flags for every training-set candidate, from the flattened
+   ntuples. The base selection is the one of `PhysicsTools/Tau3muANA/tau3mu_analyser.py` (L1 OR and
+   HLT_DoubleMu3_TkMu_DsTau3Mu, muon acceptance, 3 global + medium muons, |Q| = 1, dR < 0.6, dz < 2.5,
+   flight significance >= 3.5, 1.62-2.0 GeV, trigger matching of the three muons); the best candidate
+   is the lowest vertex chi2 among the base candidates of the event. It stops if a needed branch is
+   missing from the flattened files.
+
+```bash
+mkdir -p ~/basecut_job/logs && cd ~/basecut_job
+condor_submit cmssw=$CMSSW_BASE flat=/lustre/cms/store/user/<you>/flat_Transformer_v1 \
+    trainset=/lustre/cms/store/user/<you>/train_Transformer_v1 \
+    $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_make_basecut_table.sub
+```
+
+   It writes `basecuts.npz` and `basecuts.json` (cut flow) into the training-set directory; copy both
+   next to the shards on EOS.
+
+2. On SWAN, after `compare_bdt` (needs `eval/compare_scores.npz` and `eval/compare_bdt.json`):
+
+```python
+from tau3muml.compare_basecuts import compare_basecuts
+res = compare_basecuts(DATA, OUT)
+```
+
+Selections: `loose`, `base`, `base_best`, `base_best_veto` (Run 2 phi and omega vetoes). Outputs in
+`eval/`: `compare_basecuts.json`, `compare_roc_basecuts.png`, `fits_<method>_base_best.png`. All
+limits here fit the background in 1.62-2.0 GeV, so the `loose` numbers differ slightly from those of
+`compare_bdt`, which fits 1.40-2.20 GeV.
+
 ## Testing without the real ntuples
 
 ```bash

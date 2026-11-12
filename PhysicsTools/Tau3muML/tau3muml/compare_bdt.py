@@ -33,6 +33,8 @@ import numpy as np
 from . import data as D
 
 BLIND = (1.74, 1.82)
+# fixed colours, so that the curves keep their colour when methods are added
+COLORS = {"transformer": "C0", "bdt_run2like": "C1", "bdt_candmu": "C2", "bdt_run2": "C3"}
 NEAR_SB = ((1.62, 1.74), (1.82, 1.94))
 RUN2_CATS = {"A": (0.0, 0.007, (1.753, 1.801)), "B": (0.007, 0.0105, (1.739, 1.815)),
              "C": (0.0105, 9.0, (1.727, 1.827))}
@@ -241,12 +243,14 @@ def best_split(edges, S, B, n_cat):
     return best
 
 
-def expected_limits(score, meta, w, extra, bkg_scale, n_grid=25):
+def expected_limits(score, meta, w, extra, bkg_scale, n_grid=25, sig_total=None, incl_fit=(1.40, 2.20)):
+    """sig_total: signal weight that the yields are normalised to (default: the signal in these arrays,
+    i.e. the fraction of all signal candidates); incl_fit: mass range of the inclusive sideband fit."""
     sig, bkg = meta["role"] == 0, meta["role"] == 1
-    ws = np.where(sig, w, 0) / w[sig].sum()   # fraction of all signal candidates in the training set
+    ws = np.where(sig, w, 0) / (w[sig].sum() if sig_total is None else sig_total)
     mass = meta["mass"]
     out = {}
-    e, S, B = interval_table(score, mass, ws, sig, bkg, BLIND, (1.40, 2.20), [BLIND], bkg_scale, n_grid)
+    e, S, B = interval_table(score, mass, ws, sig, bkg, BLIND, incl_fit, [BLIND], bkg_scale, n_grid)
     ul, d = best_split(e, S, B, 2)
     out["inclusive"] = {"ul": ul, **d}
     if "massres" in extra and "is3glb" in extra:
@@ -398,16 +402,16 @@ def print_table(res, subsets):
         print(f"{c:>16s} " + " ".join(f"{res['methods'][m]['expected_ul'][c]['ratio']:13.3f}" for m in meth))
 
 
-def plot_fits(scores, meta, w, res, ev):
-    """Sideband mass and exponential fit in each inclusive score category, per method: fits_<method>.png"""
+def plot_fits(scores, meta, w, res, ev, fit=(1.40, 2.20), tag=""):
+    """Sideband mass and exponential fit in each inclusive score category, per method: fits_<method><tag>.png"""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     sig, bkg = meta["role"] == 0, meta["role"] == 1
     m = meta["mass"]
-    pieces = [(1.40, BLIND[0]), (BLIND[1], 2.20)]
-    bins = np.linspace(1.40, 2.20, 41)
+    pieces = [(fit[0], BLIND[0]), (BLIND[1], fit[1])]
+    bins = np.linspace(fit[0], fit[1], int(round((fit[1] - fit[0]) / 0.02)) + 1)
     bw = bins[1] - bins[0]
     c = 0.5 * (bins[1:] + bins[:-1])
     for name, s in scores.items():
@@ -417,18 +421,18 @@ def plot_fits(scores, meta, w, res, ev):
             sb = bkg & (s >= cuts[k]) & (s < cuts[k + 1])
             sg = sig & (s >= cuts[k]) & (s < cuts[k + 1])
             mm = m[sb]
-            mm = mm[(mm >= 1.40) & (mm <= 2.20) & ((mm < BLIND[0]) | (mm >= BLIND[1]))]
+            mm = mm[(mm >= fit[0]) & (mm <= fit[1]) & ((mm < BLIND[0]) | (mm >= BLIND[1]))]
             h, _ = np.histogram(mm, bins)
             ok = (c < BLIND[0]) | (c > BLIND[1])
             ax.errorbar(c[ok], h[ok], yerr=np.sqrt(h[ok]), fmt="o", color="k", ms=4, label=f"sidebands ({len(mm)})")
-            xx = np.linspace(1.40, 2.20, 300)
+            xx = np.linspace(fit[0], fit[1], 300)
             if len(mm) >= 3:
                 lam = np.linspace(-10, 10, 1001)
                 norm = sum(_integ(lam, a, b) for a, b in pieces)
                 best = lam[np.argmax(lam * mm.sum() - len(mm) * np.log(norm))]
                 ax.plot(xx, len(mm) * bw * np.exp(best * xx) / sum(_integ(best, a, b) for a, b in pieces), "r-",
                         label=f"exponential, slope {best:.1f}/GeV")
-            ax.axvspan(*BLIND, color="grey", alpha=0.2, label=f"SR: {exp_fit(m[sb], (1.40, 2.20), BLIND, [BLIND]):.2f} expected")
+            ax.axvspan(*BLIND, color="grey", alpha=0.2, label=f"SR: {exp_fit(m[sb], fit, BLIND, [BLIND]):.2f} expected")
             hs, _ = np.histogram(m[sg], bins, weights=w[sg])
             if hs.max() > 0:
                 ax.step(bins[:-1], hs / hs.max() * max(h.max(), 3) * 0.9, where="post", color="b", label="signal MC (shape)")
@@ -438,7 +442,7 @@ def plot_fits(scores, meta, w, res, ev):
             ax.set_ylim(0, max(h.max(), 3) * 1.6)
             ax.legend(fontsize=8)
         fig.tight_layout()
-        fig.savefig(os.path.join(ev, f"fits_{name}.png"), dpi=120)
+        fig.savefig(os.path.join(ev, f"fits_{name}{tag}.png"), dpi=120)
         plt.close(fig)
 
 
@@ -455,7 +459,7 @@ def make_plots(scores, meta, w, subsets, ev):
             s_, ww = s[tb], w[tb]
             o = np.argsort(-s_)
             tp = np.cumsum(ww[o] * (y[o] == 1)); fp = np.cumsum(y[o] == 0)
-            ax.plot(tp / tp[-1], np.maximum(fp / fp[-1], 1e-7), label=name)
+            ax.plot(tp / tp[-1], np.maximum(fp / fp[-1], 1e-7), label=name, color=COLORS.get(name))
         ax.set_yscale("log"); ax.set_xlabel("signal efficiency"); ax.set_ylabel("sideband efficiency")
         ax.set_title(sub); ax.grid(alpha=0.3); ax.legend(fontsize=8)
     fig.tight_layout()
