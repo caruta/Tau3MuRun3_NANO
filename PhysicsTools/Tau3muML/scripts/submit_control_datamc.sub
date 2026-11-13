@@ -1,0 +1,17 @@
+# Ds -> phi(mumu) pi data/MC comparison of the classifier inputs, as a batch job (inside cmsenv).
+# Run the stages one after the other (each needs the previous one's output in WORK):
+#   mkdir -p logs
+#   condor_submit cmssw=$CMSSW_BASE stage=fit flat=/lustre/cms/store/user/<you>/flat_Transformer_v1 \
+#       trainset=/lustre/cms/store/user/<you>/train_Transformer_v1 work=/lustre/cms/store/user/<you>/control_datamc \
+#       $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_control_datamc.sub
+# then stage=hist, then (interactively, a minute) python3 control_datamc.py report --work <work>
+executable     = $(cmssw)/src/PhysicsTools/Tau3muML/scripts/run_script.sh
+arguments      = $(cmssw) control_datamc.py $(stage) --flat-dir $(flat) --train-set $(trainset) --work $(work) --jobs 16
+output         = logs/control_datamc_$(stage).$(ClusterId).out
+error          = logs/control_datamc_$(stage).$(ClusterId).err
+log            = logs/control_datamc.log
+request_cpus   = 16
+request_memory = 32GB
++MaxRuntime    = 86400
+getenv         = False
+queue

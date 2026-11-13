@@ -217,6 +217,27 @@ Selections: `loose`, `base`, `base_best`, `base_best_veto` (Run 2 phi and omega 
 limits here fit the background in 1.62-2.0 GeV, so the `loose` numbers differ slightly from those of
 `compare_bdt`, which fits 1.40-2.20 GeV.
 
+## Data/MC check of the inputs on Ds -> phi(mumu) pi
+
+`scripts/control_datamc.py` compares every transformer input (candidate, the two muon legs, the
+pion leg, all context tokens and their multiplicities) between background-subtracted Ds -> phi pi
+data and nPV-reweighted Ds -> phi pi MC, per era, for early/late 2024 (run 383000) and for the year.
+Background subtraction as in the Run 2 AN (section 8.3): peak 1.93-2.01 GeV minus the 1.72-1.80 GeV
+sideband scaled by an exponential + Ds + D+ fit. Metric: separation 2|AUC(data vs MC) - 0.5|.
+
+```bash
+cd ~/control_job && mkdir -p logs
+S=$CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts
+A="--flat-dir /lustre/.../flat_Transformer_v1 --train-set /lustre/.../train_Transformer_v1 --work /lustre/.../control_datamc --jobs 16"
+python3 $S/control_datamc.py fit  $A     # or as a batch job: submit_control_datamc.sub with stage=fit
+python3 $S/control_datamc.py hist $A     # stage=hist; the long one
+python3 $S/control_datamc.py report --work /lustre/.../control_datamc --model-config <OUT>/fold0/config.json
+```
+
+Selection (Run 2 AN section 8.1 with the Run 3 muon acceptance): two global muons, OS mass
+0.97-1.07 GeV, track pT > 1.2 GeV, flight significance >= 2; options `--phi-window`, `--fsig-min`,
+`--trk-pt-min`, `--hlt <trigger bit>`, `--data-frac` (to use a fraction of the data).
+
 ## Testing without the real ntuples
 
 ```bash
