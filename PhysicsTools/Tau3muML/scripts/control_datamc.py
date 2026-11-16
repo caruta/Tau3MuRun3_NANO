@@ -54,6 +54,7 @@ SB = (1.72, 1.80)
 RUN_SPLIT = 383000
 MU_MASS = 0.1056584
 N_BINS = 40
+MC_SAMPLE_MAX = 300000   # MC values per input used to choose the bins
 
 
 # ---------------------------------------------------------------- inputs and selection
@@ -198,7 +199,7 @@ def stage1_file(args):
         for a in read_chunks(path, F.required_branches(names) + ["label_dsphipi", "mu_isGlobal"], cfg["step"]):
             ok, _ = selection(a, False, cfg)
             for k, (v, _) in variables(a[ok], names).items():
-                vals.setdefault(k, []).append(v[:20000])
+                vals.setdefault(k, []).append(v[:5000].astype(np.float32))
             break
         res["mc_sample"] = {k: np.concatenate(v) for k, v in vals.items()}
     return res
@@ -277,7 +278,10 @@ def stage1_merge(args):
     parts = sorted(glob.glob(os.path.join(args.work, "parts", "fit_part*.pkl")))
     acc = {"mass": {}, "pv_peak": {}, "pv_sb": {}, "pv_mc": 0, "n": {}}
     mc_vals, cfg, nerr = {}, None, 0
-    for p in parts:
+    rng = np.random.default_rng(1)
+    for i, p in enumerate(parts):
+        if i % 20 == 0:
+            print(f"  merging part {i + 1}/{len(parts)}", flush=True)
         r = pickle.load(open(p, "rb"))
         cfg, a = r["cfg"], r["acc"]
         nerr += len(r["errors"])
@@ -288,11 +292,18 @@ def stage1_merge(args):
         for s_, n in a["n"].items():
             acc["n"][s_] = acc["n"].get(s_, 0) + n
         for k, v in r["mc_vals"].items():
-            mc_vals.setdefault(k, []).extend(v)
+            # keep a bounded random MC sample per input, so the merge fits in a few hundred MB
+            x = np.concatenate([np.asarray(a_, np.float32) for a_ in v]) if v else np.zeros(0, np.float32)
+            if k in mc_vals:
+                x = np.concatenate([mc_vals[k], x])
+            if len(x) > MC_SAMPLE_MAX:
+                x = rng.choice(x, MC_SAMPLE_MAX, replace=False)
+            mc_vals[k] = x
+        del r, a
     print(f"merged {len(parts)} parts ({nerr} unreadable files in total)")
     if args.expect_parts and len(parts) != args.expect_parts:
         sys.exit(f"expected {args.expect_parts} parts, found {len(parts)}: some jobs are missing")
-    stage1_finish(args, cfg, acc, mc_vals)
+    stage1_finish(args, cfg, acc, {k: [v] for k, v in mc_vals.items()})
 
 
 def stage1_finish(args, cfg, acc, mc_vals):
