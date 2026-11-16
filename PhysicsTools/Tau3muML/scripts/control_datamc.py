@@ -35,6 +35,7 @@ import glob
 import json
 import multiprocessing as mp
 import os
+import pickle
 import re
 import sys
 import time
@@ -263,6 +264,38 @@ def stage1(args, cfg, names, files):
                 print(f"  fit: {i + 1}/{len(files)} files, {time.time() - t0:.0f} s", flush=True)
     for e in errors:
         print("  unreadable:", e)
+    if args.nparts > 1:
+        path = os.path.join(args.work, "parts", f"fit_part{args.part:04d}.pkl")
+        with open(path, "wb") as fh:
+            pickle.dump({"acc": acc, "mc_vals": mc_vals, "cfg": cfg, "errors": errors}, fh)
+        print(f"wrote {path}; when all parts are done: control_datamc.py fit-merge --work {args.work}")
+        return
+    stage1_finish(args, cfg, acc, mc_vals)
+
+
+def stage1_merge(args):
+    parts = sorted(glob.glob(os.path.join(args.work, "parts", "fit_part*.pkl")))
+    acc = {"mass": {}, "pv_peak": {}, "pv_sb": {}, "pv_mc": 0, "n": {}}
+    mc_vals, cfg, nerr = {}, None, 0
+    for p in parts:
+        r = pickle.load(open(p, "rb"))
+        cfg, a = r["cfg"], r["acc"]
+        nerr += len(r["errors"])
+        for k in ("mass", "pv_peak", "pv_sb"):
+            for g, h in a[k].items():
+                acc[k][g] = acc[k].get(g, 0) + h
+        acc["pv_mc"] = acc["pv_mc"] + a["pv_mc"]
+        for s_, n in a["n"].items():
+            acc["n"][s_] = acc["n"].get(s_, 0) + n
+        for k, v in r["mc_vals"].items():
+            mc_vals.setdefault(k, []).extend(v)
+    print(f"merged {len(parts)} parts ({nerr} unreadable files in total)")
+    if args.expect_parts and len(parts) != args.expect_parts:
+        sys.exit(f"expected {args.expect_parts} parts, found {len(parts)}: some jobs are missing")
+    stage1_finish(args, cfg, acc, mc_vals)
+
+
+def stage1_finish(args, cfg, acc, mc_vals):
     edges_m = np.linspace(*FIT_RANGE, 201)
     fits, pv_w = {}, {}
     for g, h in sorted(acc["mass"].items()):
@@ -369,8 +402,26 @@ def stage2(args, cfg, names, files):
     for e in errors:
         print("  unreadable:", e)
     flat = {f"{g}|{kind}|{k}|{j}": v[j] for (g, kind), d in tot.items() for k, v in d.items() for j in (0, 1)}
+    if args.nparts > 1:
+        path = os.path.join(args.work, "parts", f"hists_part{args.part:04d}.npz")
+        np.savez_compressed(path, **flat)
+        print(f"wrote {path}; when all parts are done: control_datamc.py hist-merge --work {args.work}")
+        return
     np.savez_compressed(os.path.join(args.work, "hists.npz"), **flat)
     print(f"wrote {args.work}/hists.npz")
+
+
+def stage2_merge(args):
+    parts = sorted(glob.glob(os.path.join(args.work, "parts", "hists_part*.npz")))
+    if args.expect_parts and len(parts) != args.expect_parts:
+        sys.exit(f"expected {args.expect_parts} parts, found {len(parts)}: some jobs are missing")
+    tot = {}
+    for p in parts:
+        z = np.load(p)
+        for k in z.files:
+            tot[k] = tot[k] + z[k] if k in tot else z[k].copy()
+    np.savez_compressed(os.path.join(args.work, "hists.npz"), **tot)
+    print(f"merged {len(parts)} parts into {args.work}/hists.npz")
 
 
 # ---------------------------------------------------------------- stage 3: report
@@ -515,7 +566,7 @@ def report(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("stage", choices=["fit", "hist", "report"])
+    ap.add_argument("stage", choices=["fit", "fit-merge", "hist", "hist-merge", "report"])
     ap.add_argument("--work", required=True, help="output directory")
     ap.add_argument("--flat-dir")
     ap.add_argument("--train-set", help="training set (its stats.json gives the transformer inputs)")
@@ -530,11 +581,20 @@ def main():
     ap.add_argument("--step", type=int, default=20000)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--model-config", help="config.json of a trained model, to flag its dropped inputs")
+    ap.add_argument("--part", type=int, default=0, help="batch mode: this job processes files part, part+nparts, ...")
+    ap.add_argument("--nparts", type=int, default=1, help="batch mode: number of jobs (outputs go to WORK/parts/)")
+    ap.add_argument("--expect-parts", type=int, default=0, help="merge stages: stop if fewer parts are found")
     args = ap.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
     os.makedirs(args.work, exist_ok=True)
     if args.stage == "report":
         return report(args)
+    if args.stage == "fit-merge":
+        return stage1_merge(args)
+    if args.stage == "hist-merge":
+        return stage2_merge(args)
+    if args.nparts > 1:
+        os.makedirs(os.path.join(args.work, "parts"), exist_ok=True)
     cfg = dict(phi_window=args.phi_window, trk_pt_min=args.trk_pt_min, fsig_min=args.fsig_min, hlt=args.hlt,
                step=args.step, data_frac=args.data_frac)
     stats = json.load(open(os.path.join(args.train_set, "stats.json")))
@@ -544,6 +604,9 @@ def main():
     print(f"{len(files)} files from {len(samples)} samples: {samples}")
     if not any(not d for _, _, d in files):
         sys.exit("no MC files found (--mc)")
+    if args.nparts > 1:
+        files = files[args.part::args.nparts]
+        print(f"part {args.part} of {args.nparts}: {len(files)} files")
     (stage1 if args.stage == "fit" else stage2)(args, cfg, names, files)
 
 

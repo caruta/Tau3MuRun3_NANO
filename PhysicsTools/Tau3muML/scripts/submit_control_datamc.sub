@@ -1,17 +1,23 @@
-# Ds -> phi(mumu) pi data/MC comparison of the classifier inputs, as a batch job (inside cmsenv).
-# Run the stages one after the other (each needs the previous one's output in WORK):
-#   mkdir -p logs
-#   condor_submit cmssw=$CMSSW_BASE stage=fit flat=/lustre/cms/store/user/<you>/flat_Transformer_v1 \
-#       trainset=/lustre/cms/store/user/<you>/train_Transformer_v1 work=/lustre/cms/store/user/<you>/control_datamc \
-#       $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_control_datamc.sub
-# then stage=hist, then (interactively, a minute) python3 control_datamc.py report --work <work>
+# Ds -> phi(mumu) pi data/MC comparison of the classifier inputs, split into many batch jobs.
+# Each stage is split over nparts jobs; merge (a few seconds, interactively) before the next stage.
+#
+#   cd ~/control_job && mkdir -p logs
+#   C="cmssw=$CMSSW_BASE flat=/lustre/cms/store/user/<you>/flat_Transformer_v1 \
+#      trainset=/lustre/cms/store/user/<you>/train_Transformer_v1 work=/lustre/cms/store/user/<you>/control_datamc nparts=100"
+#   condor_submit $C stage=fit  $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_control_datamc.sub
+#   (all done)  python3 control_datamc.py fit-merge  --work <work> --expect-parts 100
+#   condor_submit $C stage=hist $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_control_datamc.sub
+#   (all done)  python3 control_datamc.py hist-merge --work <work> --expect-parts 100
+#   python3 control_datamc.py report --work <work> --model-config <OUT>/fold0/config.json
+#
+# Extra options for control_datamc.py (e.g. --data-frac 0.25) go in extra="...".
 executable     = $(cmssw)/src/PhysicsTools/Tau3muML/scripts/run_script.sh
-arguments      = $(cmssw) control_datamc.py $(stage) --flat-dir $(flat) --train-set $(trainset) --work $(work) --jobs 16
-output         = logs/control_datamc_$(stage).$(ClusterId).out
-error          = logs/control_datamc_$(stage).$(ClusterId).err
+arguments      = $(cmssw) control_datamc.py $(stage) --flat-dir $(flat) --train-set $(trainset) --work $(work) --jobs 2 --part $(Process) --nparts $(nparts) $(extra)
+output         = logs/control_datamc_$(stage).$(ClusterId).$(Process).out
+error          = logs/control_datamc_$(stage).$(ClusterId).$(Process).err
 log            = logs/control_datamc.log
-request_cpus   = 16
-request_memory = 32GB
-+MaxRuntime    = 86400
+request_cpus   = 2
+request_memory = 6GB
++MaxRuntime    = 43200
 getenv         = False
-queue
+queue $(nparts)

@@ -229,10 +229,14 @@ sideband scaled by an exponential + Ds + D+ fit. Metric: separation 2|AUC(data v
 cd ~/control_job && mkdir -p logs
 S=$CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts
 A="--flat-dir /lustre/.../flat_Transformer_v1 --train-set /lustre/.../train_Transformer_v1 --work /lustre/.../control_datamc --jobs 16"
-python3 $S/control_datamc.py fit  $A     # or as a batch job: submit_control_datamc.sub with stage=fit
-python3 $S/control_datamc.py hist $A     # stage=hist; the long one
+python3 $S/control_datamc.py fit  $A
+python3 $S/control_datamc.py hist $A     # the long one
 python3 $S/control_datamc.py report --work /lustre/.../control_datamc --model-config <OUT>/fold0/config.json
 ```
+
+On a slow machine, split `fit` and `hist` over many HTCondor jobs with
+`scripts/submit_control_datamc.sub` (`--part i --nparts N`, outputs in `WORK/parts/`), then merge with
+`fit-merge` / `hist-merge` before the next stage; the commands are in the file header.
 
 Selection (Run 2 AN section 8.1 with the Run 3 muon acceptance): two global muons, OS mass
 0.97-1.07 GeV, track pT > 1.2 GeV, flight significance >= 2; options `--phi-window`, `--fsig-min`,
