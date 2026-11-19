@@ -267,19 +267,24 @@ def fit_mass(counts, edges):
     lo, hi = float(best[1]), float(best[2])
     b_peak = _window_sum(lo, hi, bfun)
     s_peak = _window_sum(lo, hi, dsfun)
-    inw = lambda a, b: (xa >= a) & (xa < b)
-    n_peak = float(counts[inw(lo, hi)].sum())
-    n_sb = float(counts[inw(*SBL)].sum() + counts[inw(*SBR)].sum())
-    b_sb = _window_sum(*SBL, bfun) + _window_sum(*SBR, bfun)
+    allfun = lambda m: np.sum(parts(p, m), axis=0)
+    # expected data in each sideband (all components, exact window integrals)
+    m_l, m_r = _window_sum(*SBL, allfun), _window_sum(*SBR, allfun)
+    # sideband weights that interpolate the background linearly in mass to the centre of the peak
+    # window: w_l * centre(SBL) + w_r * centre(SBR) = centre(peak)
+    c, cl, cr = 0.5 * (lo + hi), 0.5 * sum(SBL), 0.5 * sum(SBR)
+    w_l = (cr - c) / (cr - cl)
     full = np.zeros(len(xa))
     full[sel] = np.sum(parts(p, x), axis=0) * w
+    inside = lambda a, b: (edges[:-1] >= a - 1e-9) & (edges[1:] <= b + 1e-9)   # bins fully inside
+    closure = lambda a, b: float(counts[inside(a, b)].sum() / max(full[inside(a, b)].sum(), 1))
     return {"params": dict(zip(["frac_Ds", "m_Ds", "sigma1", "f_core", "k_tail", "frac_Dplus", "m_Dplus", "b0", "b1", "b2"],
                                map(float, p))),
             "N_Ds": float(fN * T), "N_Ds_in_peak": s_peak, "sigma_eff": s_eff, "peak": [float(lo), float(hi)],
-            "sbl": list(SBL), "sbr": list(SBR), "bkg_in_peak": b_peak, "n_peak": n_peak, "n_sb": n_sb,
-            "alpha": b_peak / n_sb if n_sb else 0.0, "purity": float(1 - b_peak / max(n_peak, 1)),
-            "sb_fit_closure": n_sb / b_sb if b_sb else float("nan"),
-            "subtracted_over_fit": (n_peak - b_peak) / s_peak if s_peak else float("nan"),
+            "sbl": list(SBL), "sbr": list(SBR), "bkg_in_peak": b_peak, "expected_in_sbl": m_l, "expected_in_sbr": m_r,
+            "alpha": b_peak / (m_l + m_r), "alpha_l": w_l * b_peak / m_l, "alpha_r": (1 - w_l) * b_peak / m_r,
+            "w_left": w_l, "purity": float(s_peak / (s_peak + b_peak)),
+            "data_over_fit": {"peak": closure(lo, hi), "sbl": closure(*SBL), "sbr": closure(*SBR)},
             "chi2_ndf": float(np.sum((n - full[sel]) ** 2 / np.maximum(n, 1)) / max(len(n) - 10, 1)),
             "converged": bool(r.success), "model": full.tolist()}
 
@@ -358,7 +363,8 @@ def stage1_finish(args, cfg, acc, mc_vals):
         F_ = fits[g]
         print(f"  {g:7s} Ds {F_['N_Ds']:10.0f}  mean {1000 * p['m_Ds']:.1f}  sigma core {1000 * p['sigma1']:.1f} "
               f"(core frac {p['f_core']:.2f}) eff {1000 * F_['sigma_eff']:.1f} MeV  Ds in peak {F_['N_Ds_in_peak']:.0f}  "
-              f"peak {F_['peak'][0]:.3f}-{F_['peak'][1]:.3f}  purity {F_['purity']:.2f}  alpha {F_['alpha']:.3f}  "
+              f"peak {F_['peak'][0]:.3f}-{F_['peak'][1]:.3f}  purity {F_['purity']:.3f}  alpha L/R {F_['alpha_l']:.3f}/{F_['alpha_r']:.3f}  "
+              f"data/fit peak {F_['data_over_fit']['peak']:.4f} SB {F_['data_over_fit']['sbl']:.4f}/{F_['data_over_fit']['sbr']:.4f}  "
               f"chi2/ndf {F_['chi2_ndf']:.2f}{'' if F_['converged'] else '  (fit did not converge)'}")
         sl = lambda lo, hi: (SLICES[:-1] >= lo - 1e-6) & (SLICES[1:] <= hi + 1e-6)
         pv2 = acc["pv2d"][g]
@@ -484,6 +490,11 @@ def stage2_merge(args):
 
 # ---------------------------------------------------------------- stage 3: report
 
+def alphas(f):
+    """Sideband scales: linear interpolation in mass if available, else one common scale."""
+    return (f["alpha_l"], f["alpha_r"]) if "alpha_l" in f else (f["alpha"], f["alpha"])
+
+
 def separation(d, m):
     """2|AUC - 0.5| between two (non-negative, normalised) binned distributions."""
     d = np.maximum(d, 0); m = np.maximum(m, 0)
@@ -524,10 +535,11 @@ def report(args):
         for g in groups:
             if (g, "peak", k) not in H or (g, "mc", k) not in H:
                 continue
-            s = fit["fits"][g]["alpha"]
+            al, ar = alphas(fit["fits"][g])
             pk, pk2 = H[(g, "peak", k)]
-            sb = H[(g, "sbl", k)][0] + H[(g, "sbr", k)][0]
-            sb2 = H[(g, "sbl", k)][1] + H[(g, "sbr", k)][1]
+            s = 1.0
+            sb = al * H[(g, "sbl", k)][0] + ar * H[(g, "sbr", k)][0]
+            sb2 = al * al * H[(g, "sbl", k)][1] + ar * ar * H[(g, "sbr", k)][1]
             mc, mc2 = H[(g, "mc", k)]
             d = pk - s * sb
             dv = pk2 + s * s * sb2
@@ -611,8 +623,8 @@ def report(args):
             for g, c in (("early", "C0"), ("late", "C3")):
                 if (g, "peak", k) not in H:
                     continue
-                s = fit["fits"][g]["alpha"]
-                d = H[(g, "peak", k)][0] - s * (H[(g, "sbl", k)][0] + H[(g, "sbr", k)][0])
+                al, ar = alphas(fit["fits"][g])
+                d = H[(g, "peak", k)][0] - al * H[(g, "sbl", k)][0] - ar * H[(g, "sbr", k)][0]
                 ax.step(range(len(d)), d / max(d.sum(), 1), where="mid", color=c, label=f"data {g}")
                 mc = H[(g, "mc", k)][0]
                 ax.step(range(len(mc)), mc / max(mc.sum(), 1), where="mid", color=c, ls="--", label=f"MC (nPV of {g})")

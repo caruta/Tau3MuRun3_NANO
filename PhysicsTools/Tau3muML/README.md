@@ -223,7 +223,8 @@ limits here fit the background in 1.62-2.0 GeV, so the `loose` numbers differ sl
 pion leg, all context tokens and their multiplicities) between background-subtracted Ds -> phi pi
 data and nPV-reweighted Ds -> phi pi MC, per era, for early/late 2024 (run 383000) and for the year.
 Background subtraction: fit in 1.88-2.08 GeV (quadratic background, double-Gaussian Ds, D+ tail);
-peak window with the best S/sqrt(S+B) minus the sidebands 1.905-1.925 and 2.015-2.055 GeV scaled to the fitted
+peak window with the best S/sqrt(S+B) minus the sidebands 1.905-1.925 and 2.015-2.055 GeV, each scaled so that
+the background is interpolated linearly in mass to the peak centre and normalised to the fitted
 background under the peak. Metric: separation 2|AUC(data vs MC) - 0.5|; the separation between the
 left and right sideband (`sideband_left_vs_right`) flags inputs whose subtraction is unreliable, and
 `separation_syst` is the change when the background under the peak moves by 2 %.
