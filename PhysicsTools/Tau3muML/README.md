@@ -222,8 +222,10 @@ limits here fit the background in 1.62-2.0 GeV, so the `loose` numbers differ sl
 `scripts/control_datamc.py` compares every transformer input (candidate, the two muon legs, the
 pion leg, all context tokens and their multiplicities) between background-subtracted Ds -> phi pi
 data and nPV-reweighted Ds -> phi pi MC, per era, for early/late 2024 (run 383000) and for the year.
-Background subtraction as in the Run 2 AN (section 8.3): peak 1.93-2.01 GeV minus the 1.72-1.80 GeV
-sideband scaled by an exponential + Ds + D+ fit. Metric: separation 2|AUC(data vs MC) - 0.5|.
+Background subtraction: fit in 1.88-2.08 GeV (quadratic background, double-Gaussian Ds, D+ tail);
+peak = mean +- 2 sigma minus the sidebands 1.905-1.925 and 2.015-2.055 GeV scaled to the fitted
+background under the peak. Metric: separation 2|AUC(data vs MC) - 0.5|; the separation between the
+left and right sideband (`sideband_left_vs_right`) flags inputs whose subtraction is unreliable.
 
 ```bash
 cd ~/control_job && mkdir -p logs
@@ -238,8 +240,8 @@ On a slow machine, split `fit` and `hist` over many HTCondor jobs with
 `scripts/submit_control_datamc.sub` (`--part i --nparts N`, outputs in `WORK/parts/`), then merge with
 `fit-merge` / `hist-merge` before the next stage; the commands are in the file header.
 
-Selection (Run 2 AN section 8.1 with the Run 3 muon acceptance): two global muons, OS mass
-0.97-1.07 GeV, track pT > 1.2 GeV, flight significance >= 2; options `--phi-window`, `--fsig-min`,
+Selection (Run 2 AN section 8.1 with the Run 3 muon acceptance, tightened for purity): two global
+muons, OS mass 1.00-1.04 GeV, track pT > 1.2 GeV, flight significance >= 3.5 (as the tau base cuts); options `--phi-window`, `--fsig-min`,
 `--trk-pt-min`, `--hlt <trigger bit>`, `--data-frac` (to use a fraction of the data).
 
 ## Testing without the real ntuples

@@ -6,10 +6,13 @@ classifier trained on MC signal vs data background can learn "MC-like" instead o
 and its signal efficiency in data is lower than MC says. Ds -> phi(mumu) pi is a real-signal-like
 sample in both data and MC.
 
-Method (as in section 8.3 of the Run 2 analysis note): data in the Ds peak [1.93, 2.01] GeV minus
-the sideband [1.72, 1.80] GeV scaled to the background under the peak from a fit of the mumupi mass
-(exponential + Ds and D+ Gaussians), compared with Ds -> phi pi MC reweighted in nPV to the
-background-subtracted data. Everything is done separately for each era, for early / late 2024
+Method (sideband subtraction, as in section 8.3 of the Run 2 analysis note, with sidebands on both
+sides of the peak): fit of the mumupi mass in 1.88-2.08 GeV (quadratic background, double-Gaussian
+Ds, D+ tail); data in the Ds peak (mean +- 2 sigma) minus the sidebands 1.905-1.925 and 2.015-2.055
+GeV scaled to the fitted background under the peak; compared with Ds -> phi pi MC reweighted in nPV
+to the background-subtracted data. A per-input check of the subtraction: the separation between the
+left and the right sideband (column sideband_left_vs_right): large values mean the background shape
+changes across the peak, and the subtracted distribution of that input is not reliable. Everything is done separately for each era, for early / late 2024
 (run < / >= 383000) and for the whole year.
 
 Inputs compared: exactly the transformer features (tau3muml.features, names from the training set's
@@ -48,9 +51,11 @@ import uproot
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from tau3muml import features as F  # noqa: E402
 
-FIT_RANGE = (1.70, 2.10)
-PEAK = (1.93, 2.01)
-SB = (1.72, 1.80)
+FIT_RANGE = (1.70, 2.10)        # selected mass range (and the mass histogram)
+LOCAL_FIT = (1.88, 2.08)        # range of the Ds fit
+SBL = (1.905, 1.925)            # sidebands next to the Ds peak (right of the D+ peak)
+SBR = (2.015, 2.055)
+SLICES = np.round(np.arange(LOCAL_FIT[0], LOCAL_FIT[1] + 1e-9, 0.005), 4)   # 5 MeV slices for nPV
 RUN_SPLIT = 383000
 MU_MASS = 0.1056584
 N_BINS = 40
@@ -170,7 +175,7 @@ def stage1_file(args):
     path, sample, is_data, cfg, names, mc_sample_frac = args
     edges_m = np.linspace(*FIT_RANGE, 201)
     edges_pv = np.arange(0, 101)
-    res = {"mass": {}, "pv_peak": {}, "pv_sb": {}, "pv_mc": None, "mc_sample": None, "n": 0}
+    res = {"mass": {}, "pv2d": {}, "pv_mc": None, "mc_sample": None, "n": 0}
     rng = np.random.default_rng(zlib.crc32(path.encode()))
     try:
         for a in read_chunks(path, SEL_BRANCHES + ["Trigger_" + cfg["hlt"]] if cfg["hlt"] else SEL_BRANCHES, cfg["step"]):
@@ -184,10 +189,7 @@ def stage1_file(args):
             if is_data:
                 for g, sel in groups_of(sample, run):
                     res["mass"][g] = res["mass"].get(g, 0) + np.histogram(m[sel], edges_m)[0]
-                    pk = sel & (m >= PEAK[0]) & (m <= PEAK[1])
-                    sb = sel & (m >= SB[0]) & (m <= SB[1])
-                    res["pv_peak"][g] = res["pv_peak"].get(g, 0) + np.histogram(pv[pk], edges_pv)[0]
-                    res["pv_sb"][g] = res["pv_sb"].get(g, 0) + np.histogram(pv[sb], edges_pv)[0]
+                    res["pv2d"][g] = res["pv2d"].get(g, 0) + np.histogram2d(m[sel], pv[sel], [SLICES, edges_pv])[0]
             else:
                 res["mass"]["MC"] = res["mass"].get("MC", 0) + np.histogram(m, edges_m)[0]
                 res["pv_mc"] = (0 if res["pv_mc"] is None else res["pv_mc"]) + np.histogram(pv, edges_pv)[0]
@@ -205,54 +207,83 @@ def stage1_file(args):
     return res
 
 
-def fit_mass(counts, edges):
-    """Binned Poisson fit: exponential + Gaussian Ds + Gaussian D+ (width scaled by mass)."""
-    from scipy.optimize import minimize
-    x = 0.5 * (edges[1:] + edges[:-1])
-    w = edges[1] - edges[0]
-    n = counts.astype(float)
+def _window_sum(lo, hi, f, step=0.0002):
+    x = np.arange(lo + step / 2, hi, step)
+    return float(np.sum(f(x)) * step)
 
-    def model(p):
-        nds, mds, sds, ndp, mdp, nb, lam = p
-        sdp = sds * mdp / mds
-        g = lambda N, mu, s: N * w * np.exp(-0.5 * ((x - mu) / s) ** 2) / (np.sqrt(2 * np.pi) * s)
-        bk = np.exp(lam * (x - FIT_RANGE[0]))
-        bk = nb * bk / (bk.sum())
-        return g(nds, mds, sds) + g(ndp, mdp, sdp) + bk
+
+def fit_mass(counts, edges):
+    """Binned Poisson fit in LOCAL_FIT: quadratic background + double-Gaussian Ds + Gaussian D+ tail.
+    Returns the Ds peak window (mean +- 2 sigma_eff, on the 5 MeV slices) and the sideband scale
+    alpha = fitted background under the peak / data in the two sidebands."""
+    from scipy.optimize import minimize
+    xa = 0.5 * (edges[1:] + edges[:-1])
+    sel = (xa >= LOCAL_FIT[0]) & (xa <= LOCAL_FIT[1])
+    x, n = xa[sel], counts[sel].astype(float)
+    w = edges[1] - edges[0]
+    T = n.sum()
+    xs = lambda m: (m - 1.98) / 0.1
+    gauss = lambda m, mu, sg: np.exp(-0.5 * ((m - mu) / sg) ** 2) / (np.sqrt(2 * np.pi) * sg)
+
+    def parts(p, m):
+        fN, mu, s1, f, k, fP, mP, b0, b1, b2 = p
+        u = xs(m)
+        bkg = T * np.maximum(b0 + b1 * u + b2 * u * u, 0) / (LOCAL_FIT[1] - LOCAL_FIT[0])
+        ds = T * fN * (f * gauss(m, mu, s1) + (1 - f) * gauss(m, mu, k * s1))
+        dp = T * fP * gauss(m, mP, s1 * mP / mu)
+        return bkg, ds, dp
 
     def nll(p):
-        mu = np.maximum(model(p), 1e-9)
+        b, d, q = parts(p, x)
+        mu = np.maximum((b + d + q) * w, 1e-9)
         return float(np.sum(mu - n * np.log(mu)))
 
-    tot = n.sum()
-    side = n[(x < 1.82) | (x > 2.05)].mean() * len(x)
-    p0 = [max(tot - side, 1) * 0.6, 1.968, 0.012, max(tot - side, 1) * 0.3, 1.869, side, -1.0]
-    bounds = [(0, None), (1.95, 1.99), (0.004, 0.04), (0, None), (1.85, 1.89), (0, None), (-20, 20)]
-    r = minimize(nll, p0, bounds=bounds, method="L-BFGS-B")
-    r = minimize(nll, r.x, bounds=bounds, method="L-BFGS-B")
+    side = ((x >= 1.90) & (x <= 1.935)) | (x >= 2.01)
+    c = np.polyfit(xs(x[side]), n[side] / w / T * (LOCAL_FIT[1] - LOCAL_FIT[0]), 2)
+    bkg0 = np.polyval(c, xs(x)) * T / (LOCAL_FIT[1] - LOCAL_FIT[0]) * w
+    fN0 = max(np.sum((n - bkg0)[(x > 1.945) & (x < 1.99)]) / T, 1e-3)
+    p0 = [fN0, 1.968, 0.009, 0.6, 2.0, 0.005, 1.8695, c[2], c[1], c[0]]
+    bounds = [(0, 1), (1.955, 1.98), (0.003, 0.03), (0.05, 1), (1.1, 4), (0, 0.5), (1.862, 1.876),
+              (None, None), (None, None), (None, None)]
+    r = minimize(nll, p0, bounds=bounds, method="L-BFGS-B", options={"maxiter": 5000})
+    r = minimize(nll, r.x, bounds=bounds, method="Powell", options={"maxiter": 20000})
+    r = minimize(nll, r.x, bounds=bounds, method="L-BFGS-B", options={"maxiter": 5000})
     p = r.x
-    lam, nb = p[6], p[5]
-    shape = lambda lo, hi: (np.exp(lam * (hi - FIT_RANGE[0])) - np.exp(lam * (lo - FIT_RANGE[0]))) / lam if abs(lam) > 1e-9 else hi - lo
-    norm = nb / shape(*FIT_RANGE)
-    b_peak = norm * shape(*PEAK)
-    n_sb = n[(x >= SB[0]) & (x <= SB[1])].sum()
-    n_peak = n[(x >= PEAK[0]) & (x <= PEAK[1])].sum()
-    return {"params": dict(zip(["N_Ds", "m_Ds", "sigma_Ds", "N_Dplus", "m_Dplus", "N_bkg", "slope"], map(float, p))),
-            "bkg_in_peak": float(b_peak), "n_peak": float(n_peak), "n_sb": float(n_sb),
-            "sb_scale": float(b_peak / n_sb) if n_sb else 0.0, "purity": float(1 - b_peak / max(n_peak, 1)),
-            "converged": bool(r.success), "model": model(p).tolist()}
+    fN, mu, s1, f, k = p[:5]
+    s_eff = float(np.sqrt(f * s1 ** 2 + (1 - f) * (k * s1) ** 2))
+    lo = max(SLICES[SLICES <= mu - 2 * s_eff].max(initial=SLICES[0]), SBL[1])
+    hi = min(SLICES[SLICES >= mu + 2 * s_eff].min(initial=SLICES[-1]), SBR[0])
+    bfun = lambda m: parts(p, m)[0]
+    dsfun = lambda m: parts(p, m)[1]
+    b_peak = _window_sum(lo, hi, bfun)
+    s_peak = _window_sum(lo, hi, dsfun)
+    inw = lambda a, b: (xa >= a) & (xa < b)
+    n_peak = float(counts[inw(lo, hi)].sum())
+    n_sb = float(counts[inw(*SBL)].sum() + counts[inw(*SBR)].sum())
+    b_sb = _window_sum(*SBL, bfun) + _window_sum(*SBR, bfun)
+    full = np.zeros(len(xa))
+    full[sel] = np.sum(parts(p, x), axis=0) * w
+    return {"params": dict(zip(["frac_Ds", "m_Ds", "sigma1", "f_core", "k_tail", "frac_Dplus", "m_Dplus", "b0", "b1", "b2"],
+                               map(float, p))),
+            "N_Ds": float(fN * T), "N_Ds_in_peak": s_peak, "sigma_eff": s_eff, "peak": [float(lo), float(hi)],
+            "sbl": list(SBL), "sbr": list(SBR), "bkg_in_peak": b_peak, "n_peak": n_peak, "n_sb": n_sb,
+            "alpha": b_peak / n_sb if n_sb else 0.0, "purity": float(1 - b_peak / max(n_peak, 1)),
+            "sb_fit_closure": n_sb / b_sb if b_sb else float("nan"),
+            "subtracted_over_fit": (n_peak - b_peak) / s_peak if s_peak else float("nan"),
+            "chi2_ndf": float(np.sum((n - full[sel]) ** 2 / np.maximum(n, 1)) / max(len(n) - 10, 1)),
+            "converged": bool(r.success), "model": full.tolist()}
 
 
 def stage1(args, cfg, names, files):
     tasks = [(f, s, d, cfg, names, args.mc_sample_frac) for f, s, d in files]
-    acc = {"mass": {}, "pv_peak": {}, "pv_sb": {}, "pv_mc": 0, "n": {}}
+    acc = {"mass": {}, "pv2d": {}, "pv_mc": 0, "n": {}}
     mc_vals, errors, t0 = {}, [], time.time()
     with mp.Pool(args.jobs) as pool:
         for i, ((f, s, d), r) in enumerate(zip(files, pool.imap(stage1_file, tasks, chunksize=2))):
             if isinstance(r, str):
                 errors.append(r)
                 continue
-            for k in ("mass", "pv_peak", "pv_sb"):
+            for k in ("mass", "pv2d"):
                 for g, h in r[k].items():
                     acc[k][g] = acc[k].get(g, 0) + h
             if r["pv_mc"] is not None:
@@ -276,7 +307,7 @@ def stage1(args, cfg, names, files):
 
 def stage1_merge(args):
     parts = sorted(glob.glob(os.path.join(args.work, "parts", "fit_part*.pkl")))
-    acc = {"mass": {}, "pv_peak": {}, "pv_sb": {}, "pv_mc": 0, "n": {}}
+    acc = {"mass": {}, "pv2d": {}, "pv_mc": 0, "n": {}}
     mc_vals, cfg, nerr = {}, None, 0
     rng = np.random.default_rng(1)
     for i, p in enumerate(parts):
@@ -285,7 +316,7 @@ def stage1_merge(args):
         r = pickle.load(open(p, "rb"))
         cfg, a = r["cfg"], r["acc"]
         nerr += len(r["errors"])
-        for k in ("mass", "pv_peak", "pv_sb"):
+        for k in ("mass", "pv2d"):
             for g, h in a[k].items():
                 acc[k][g] = acc[k].get(g, 0) + h
         acc["pv_mc"] = acc["pv_mc"] + a["pv_mc"]
@@ -314,9 +345,13 @@ def stage1_finish(args, cfg, acc, mc_vals):
             continue
         fits[g] = fit_mass(h, edges_m)
         p = fits[g]["params"]
-        print(f"  {g:7s} Ds {p['N_Ds']:10.0f}  D+ {p['N_Dplus']:9.0f}  sigma {1000 * p['sigma_Ds']:.1f} MeV  "
-              f"purity in peak {fits[g]['purity']:.2f}  SB scale {fits[g]['sb_scale']:.3f}")
-        sig_pv = acc["pv_peak"][g] - fits[g]["sb_scale"] * acc["pv_sb"][g]
+        F_ = fits[g]
+        print(f"  {g:7s} Ds {F_['N_Ds']:10.0f}  mean {1000 * p['m_Ds']:.1f}  sigma_eff {1000 * F_['sigma_eff']:.1f} MeV  "
+              f"peak {F_['peak'][0]:.3f}-{F_['peak'][1]:.3f}  purity {F_['purity']:.2f}  alpha {F_['alpha']:.3f}  "
+              f"chi2/ndf {F_['chi2_ndf']:.2f}{'' if F_['converged'] else '  (fit did not converge)'}")
+        sl = lambda lo, hi: (SLICES[:-1] >= lo - 1e-6) & (SLICES[1:] <= hi + 1e-6)
+        pv2 = acc["pv2d"][g]
+        sig_pv = pv2[sl(*F_["peak"])].sum(0) - F_["alpha"] * (pv2[sl(*SBL)].sum(0) + pv2[sl(*SBR)].sum(0))
         mc = acc["pv_mc"].astype(float)
         ratio = np.where(mc > 0, np.maximum(sig_pv, 0) / max(sig_pv.sum(), 1) / np.maximum(mc / max(mc.sum(), 1), 1e-12), 1.0)
         pv_w[g] = np.where(mc > 20, ratio, 1.0).tolist()
@@ -368,7 +403,7 @@ def stage2_file(args):
             if cfg["data_frac"] < 1 and is_data:
                 ok &= rng.random(len(ok)) < cfg["data_frac"]
             if is_data:
-                ok &= ((m >= PEAK[0]) & (m <= PEAK[1])) | ((m >= SB[0]) & (m <= SB[1]))
+                ok &= (m >= LOCAL_FIT[0]) & (m <= LOCAL_FIT[1])
             if not ok.any():
                 continue
             a = a[ok]
@@ -378,10 +413,11 @@ def stage2_file(args):
             pv = np.clip(ak.to_numpy(a["nPVtx"]).astype(int), 0, 99)
             if is_data:
                 for g, sel in groups_of(sample, run):
-                    pk = sel & (m >= PEAK[0]) & (m <= PEAK[1])
-                    sb = sel & (m >= SB[0]) & (m <= SB[1])
-                    fill(g, "peak", vals, pk.astype(float))
-                    fill(g, "sb", vals, sb.astype(float))
+                    if g not in fit["fits"]:
+                        continue
+                    for kind in ("peak", "sbl", "sbr"):
+                        lo, hi = fit["fits"][g][kind]
+                        fill(g, kind, vals, (sel & (m >= lo) & (m < hi)).astype(float))
             else:
                 for g, w in pvw.items():
                     fill(g, "mc", vals, w[pv])
@@ -477,9 +513,10 @@ def report(args):
         for g in groups:
             if (g, "peak", k) not in H or (g, "mc", k) not in H:
                 continue
-            s = fit["fits"][g]["sb_scale"]
+            s = fit["fits"][g]["alpha"]
             pk, pk2 = H[(g, "peak", k)]
-            sb, sb2 = H[(g, "sb", k)]
+            sb = H[(g, "sbl", k)][0] + H[(g, "sbr", k)][0]
+            sb2 = H[(g, "sbl", k)][1] + H[(g, "sbr", k)][1]
             mc, mc2 = H[(g, "mc", k)]
             d = pk - s * sb
             dv = pk2 + s * s * sb2
@@ -491,7 +528,9 @@ def report(args):
             chi2 = float(np.sum((dn[ok] - mn[ok]) ** 2 / var[ok]))
             sp = separation(d, mc)
             sep[(k, g)] = sp
+            closure = separation(H[(g, "sbl", k)][0], H[(g, "sbr", k)][0])
             rows.append(dict(variable=k, group=g, separation=sp, chi2_ndf=chi2 / max(ok.sum() - 1, 1),
+                             sideband_left_vs_right=closure,
                              ds_yield=float(d.sum()) if k.startswith("cand:") else np.nan, dropped=k in dropped))
     import csv
     with open(os.path.join(rep, "separation.csv"), "w", newline="") as fh:
@@ -519,9 +558,11 @@ def report(args):
         h = np.asarray(fit["mass_hist"][g]); f = fit["fits"][g]
         ax.errorbar(x, h, np.sqrt(h), fmt=".", ms=2, color="k")
         ax.plot(x, f["model"], "r-", lw=1)
-        for lo, hi, c in (PEAK + ("C2",), SB + ("C0",)):
+        for lo, hi, c in (tuple(f["peak"]) + ("C2",), SBL + ("C0",), SBR + ("C0",)):
             ax.axvspan(lo, hi, color=c, alpha=0.12)
-        ax.set_title(f"{g}: Ds {f['params']['N_Ds']:.3g}, purity {f['purity']:.2f}", fontsize=9)
+        ax.set_xlim(*LOCAL_FIT)
+        ax.set_ylim(0, 1.15 * h[(x >= LOCAL_FIT[0]) & (x <= LOCAL_FIT[1])].max())
+        ax.set_title(f"{g}: Ds {f['N_Ds']:.3g}, σ {1000 * f['sigma_eff']:.1f} MeV, purity {f['purity']:.2f}", fontsize=9)
         ax.set_xlabel("m(μμπ) [GeV]", fontsize=8)
     for ax in axs.ravel()[nG:]:
         ax.axis("off")
@@ -557,8 +598,8 @@ def report(args):
             for g, c in (("early", "C0"), ("late", "C3")):
                 if (g, "peak", k) not in H:
                     continue
-                s = fit["fits"][g]["sb_scale"]
-                d = H[(g, "peak", k)][0] - s * H[(g, "sb", k)][0]
+                s = fit["fits"][g]["alpha"]
+                d = H[(g, "peak", k)][0] - s * (H[(g, "sbl", k)][0] + H[(g, "sbr", k)][0])
                 ax.step(range(len(d)), d / max(d.sum(), 1), where="mid", color=c, label=f"data {g}")
                 mc = H[(g, "mc", k)][0]
                 ax.step(range(len(mc)), mc / max(mc.sum(), 1), where="mid", color=c, ls="--", label=f"MC (nPV of {g})")
@@ -590,9 +631,9 @@ def main():
     ap.add_argument("--mc", default="*_MC_DsPhiPi", help="DsPhiPi MC sample pattern")
     ap.add_argument("--data-frac", type=float, default=1.0, help="random fraction of data candidates used")
     ap.add_argument("--mc-sample-frac", type=float, default=0.3, help="fraction of MC files sampled for the binning")
-    ap.add_argument("--phi-window", nargs=2, type=float, default=[0.97, 1.07])
+    ap.add_argument("--phi-window", nargs=2, type=float, default=[1.00, 1.04])
     ap.add_argument("--trk-pt-min", type=float, default=1.2)
-    ap.add_argument("--fsig-min", type=float, default=2.0)
+    ap.add_argument("--fsig-min", type=float, default=3.5)
     ap.add_argument("--hlt", default="", help="optional event trigger bit, e.g. HLT_DoubleMu3_Trk_Tau3mu")
     ap.add_argument("--step", type=int, default=20000)
     ap.add_argument("--jobs", type=int, default=8)
