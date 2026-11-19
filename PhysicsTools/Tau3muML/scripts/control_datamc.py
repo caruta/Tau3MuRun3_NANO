@@ -8,7 +8,7 @@ sample in both data and MC.
 
 Method (sideband subtraction, as in section 8.3 of the Run 2 analysis note, with sidebands on both
 sides of the peak): fit of the mumupi mass in 1.88-2.08 GeV (quadratic background, double-Gaussian
-Ds, D+ tail); data in the Ds peak (mean +- 2 sigma) minus the sidebands 1.905-1.925 and 2.015-2.055
+Ds, D+ tail); data in the Ds peak window (the one with the best S/sqrt(S+B)) minus the sidebands 1.905-1.925 and 2.015-2.055
 GeV scaled to the fitted background under the peak; compared with Ds -> phi pi MC reweighted in nPV
 to the background-subtracted data. A per-input check of the subtraction: the separation between the
 left and the right sideband (column sideband_left_vs_right): large values mean the background shape
@@ -214,7 +214,7 @@ def _window_sum(lo, hi, f, step=0.0002):
 
 def fit_mass(counts, edges):
     """Binned Poisson fit in LOCAL_FIT: quadratic background + double-Gaussian Ds + Gaussian D+ tail.
-    Returns the Ds peak window (mean +- 2 sigma_eff, on the 5 MeV slices) and the sideband scale
+    Returns the Ds peak window (best S/sqrt(S+B), on the 5 MeV slices) and the sideband scale
     alpha = fitted background under the peak / data in the two sidebands."""
     from scipy.optimize import minimize
     xa = 0.5 * (edges[1:] + edges[:-1])
@@ -251,10 +251,20 @@ def fit_mass(counts, edges):
     p = r.x
     fN, mu, s1, f, k = p[:5]
     s_eff = float(np.sqrt(f * s1 ** 2 + (1 - f) * (k * s1) ** 2))
-    lo = max(SLICES[SLICES <= mu - 2 * s_eff].max(initial=SLICES[0]), SBL[1])
-    hi = min(SLICES[SLICES >= mu + 2 * s_eff].min(initial=SLICES[-1]), SBR[0])
     bfun = lambda m: parts(p, m)[0]
     dsfun = lambda m: parts(p, m)[1]
+    # peak window on the 5 MeV slices: the one with the best S/sqrt(S+B), i.e. the most precise
+    # subtracted distribution (the double-Gaussian tails make mean +- 2 sigma_eff far too wide)
+    best = (-1, SLICES[0], SLICES[-1])
+    for lo_ in SLICES[(SLICES >= SBL[1]) & (SLICES < mu)]:
+        for hi_ in SLICES[(SLICES <= SBR[0]) & (SLICES > mu)]:
+            if hi_ - lo_ < 0.015:
+                continue
+            S_, B_ = _window_sum(lo_, hi_, dsfun, 0.001), _window_sum(lo_, hi_, bfun, 0.001)
+            fom = S_ / np.sqrt(S_ + B_) if S_ + B_ > 0 else 0
+            if fom > best[0]:
+                best = (fom, lo_, hi_)
+    lo, hi = float(best[1]), float(best[2])
     b_peak = _window_sum(lo, hi, bfun)
     s_peak = _window_sum(lo, hi, dsfun)
     inw = lambda a, b: (xa >= a) & (xa < b)
@@ -346,7 +356,8 @@ def stage1_finish(args, cfg, acc, mc_vals):
         fits[g] = fit_mass(h, edges_m)
         p = fits[g]["params"]
         F_ = fits[g]
-        print(f"  {g:7s} Ds {F_['N_Ds']:10.0f}  mean {1000 * p['m_Ds']:.1f}  sigma_eff {1000 * F_['sigma_eff']:.1f} MeV  "
+        print(f"  {g:7s} Ds {F_['N_Ds']:10.0f}  mean {1000 * p['m_Ds']:.1f}  sigma core {1000 * p['sigma1']:.1f} "
+              f"(core frac {p['f_core']:.2f}) eff {1000 * F_['sigma_eff']:.1f} MeV  Ds in peak {F_['N_Ds_in_peak']:.0f}  "
               f"peak {F_['peak'][0]:.3f}-{F_['peak'][1]:.3f}  purity {F_['purity']:.2f}  alpha {F_['alpha']:.3f}  "
               f"chi2/ndf {F_['chi2_ndf']:.2f}{'' if F_['converged'] else '  (fit did not converge)'}")
         sl = lambda lo, hi: (SLICES[:-1] >= lo - 1e-6) & (SLICES[1:] <= hi + 1e-6)
@@ -529,8 +540,10 @@ def report(args):
             sp = separation(d, mc)
             sep[(k, g)] = sp
             closure = separation(H[(g, "sbl", k)][0], H[(g, "sbr", k)][0])
-            rows.append(dict(variable=k, group=g, separation=sp, chi2_ndf=chi2 / max(ok.sum() - 1, 1),
-                             sideband_left_vs_right=closure,
+            # background-subtraction uncertainty: background under the peak varied by +-2 %
+            syst = max(abs(separation(pk - s * f_ * sb, mc) - sp) for f_ in (0.98, 1.02))
+            rows.append(dict(variable=k, group=g, separation=sp, separation_syst=syst,
+                             chi2_ndf=chi2 / max(ok.sum() - 1, 1), sideband_left_vs_right=closure,
                              ds_yield=float(d.sum()) if k.startswith("cand:") else np.nan, dropped=k in dropped))
     import csv
     with open(os.path.join(rep, "separation.csv"), "w", newline="") as fh:
