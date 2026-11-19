@@ -461,8 +461,13 @@ def report(args):
     dropped = set()
     if args.model_config:
         c = json.load(open(args.model_config))
-        for t, lst in (c.get("drop") or {}).items():
-            dropped |= {f"{t}:{v}" for v in lst}
+        drop = c.get("drop") or []
+        if isinstance(drop, dict):           # {"trk": [names]} form
+            drop = [f"{t}:{v}" for t, lst in drop.items() for v in lst]
+        dropped |= set(drop)                 # model config: ["trk:nPixHits", ...]
+        for t in c.get("drop_tokens") or []:
+            dropped |= {f"{t}:*"}
+        print(f"inputs ignored by the model: {sorted(dropped) or 'none'}")
     groups = [g for g in sorted(fit["fits"], key=lambda g: (g not in ("all", "early", "late"), g))]
     rep = os.path.join(args.work, "report")
     os.makedirs(rep, exist_ok=True)
