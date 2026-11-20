@@ -44,12 +44,15 @@ import sys
 import time
 import zlib
 
-import awkward as ak
 import numpy as np
-import uproot
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from tau3muml import features as F  # noqa: E402
+# the ntuple readers are needed only by the fit and hist stages; the merge and report stages run
+# with numpy, scipy and matplotlib alone (e.g. on SWAN or a laptop, from fit.json and hists.npz)
+if not any(a in sys.argv[1:2] for a in ("report", "fit-merge", "hist-merge")):
+    import awkward as ak
+    import uproot
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from tau3muml import features as F  # noqa: E402
 
 FIT_RANGE = (1.70, 2.10)        # selected mass range (and the mass histogram)
 LOCAL_FIT = (1.88, 2.08)        # range of the Ds fit
