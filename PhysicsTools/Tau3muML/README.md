@@ -246,6 +246,26 @@ Selection (Run 2 AN section 8.1 with the Run 3 muon acceptance, tightened for pu
 muons, OS mass 1.00-1.04 GeV, track pT > 1.2 GeV, flight significance >= 3.5 (as the tau base cuts); options `--phi-window`, `--fsig-min`,
 `--trk-pt-min`, `--hlt <trigger bit>`, `--data-frac` (to use a fraction of the data).
 
+### Classifier score efficiency on Ds -> phi pi, data vs MC
+
+Does a cut on each classifier keep the same fraction of real Ds as of simulated Ds, in every era?
+`compare_bdt` (on SWAN) saves the fold-0 BDTs and the score cuts at fixed tau signal efficiency in
+`<OUT>/eval/bdt_models/`; copy that folder and `<OUT>/fold0/best.pt` to Bari. Then, after `fit-merge`:
+
+```bash
+python3 $S/control_datamc.py score $A --model <OUT>/fold0/best.pt --bdt-dir <OUT>/eval/bdt_models   # or stage=score on condor
+python3 $S/control_datamc.py score-report --work /lustre/.../control_datamc --bdt-dir <OUT>/eval/bdt_models
+```
+
+`score` runs the transformer and the three BDTs on every selected candidate with mass 1.88-2.08 GeV
+(needs torch and xgboost). `score-report` fits the data Ds yield before and after each cut, with the
+peak shapes fixed to the group's fit in `fit.json` (and again with the Ds mass and width free, as a
+cross-check), and compares with the nPV-weighted MC efficiency. Cuts: the scores that keep 80/50/20% of
+the Ds MC, and the tau working points (90/80/50/20% signal efficiency). Output:
+`report/score_efficiency.csv` and `report/score_efficiency_ratio.png` (data/MC ratio per era).
+The third leg is a pion, not a muon, so these are out-of-distribution inputs for every classifier:
+what matters is whether data and MC agree, not the efficiency itself.
+
 ## Testing without the real ntuples
 
 ```bash

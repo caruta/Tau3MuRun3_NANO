@@ -6,7 +6,11 @@ import queue
 import threading
 
 import numpy as np
-import torch
+
+try:
+    import torch
+except ImportError:      # the numpy-only helpers (shards, weights, folds) work without it
+    torch = None
 
 META = ["label", "role", "sample", "fold", "mass", "nPVtx", "gen_weight", "sig_prod", "run", "event", "cand_idx"]
 

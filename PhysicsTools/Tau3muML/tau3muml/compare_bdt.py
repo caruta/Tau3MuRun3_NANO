@@ -76,6 +76,24 @@ def load_inputs(data_dir):
     return stats, np.concatenate(cand), np.concatenate(mu), meta
 
 
+def run2like_matrix(cn, mn, cand, mu):
+    """bdt_run2like inputs from the transformer's candidate and muon-token features."""
+    ci = [cn.index(n) for n in RUN2LIKE_CAND if n in cn]
+    cols, names = [cand[:, ci]], [cn[i] for i in ci]
+    for n in RUN2LIKE_MU:
+        if n in mn:
+            v = mu[:, :, mn.index(n)].astype(np.float32)
+            cols += [v.min(1, keepdims=True), v.max(1, keepdims=True)]
+            names += [f"min_mu_{n}", f"max_mu_{n}"]
+    return np.concatenate(cols, axis=1).astype(np.float32), names
+
+
+def candmu_matrix(cn, mn, cand, mu):
+    """bdt_candmu inputs: all candidate features and all features of each muon leg."""
+    X = np.concatenate([cand, mu.reshape(len(mu), -1)], axis=1).astype(np.float32)
+    return X, cn + [f"mu{i + 1}_{n}" for i in range(mu.shape[1]) for n in mn]
+
+
 def feature_sets(stats, cand, mu, meta, data_dir):
     cn = stats["features"]["cand"]
     mn = stats["features"]["tokens"]["mu"]
@@ -95,16 +113,8 @@ def feature_sets(stats, cand, mu, meta, data_dir):
     else:
         print(f"no {path}: bdt_run2 skipped (run scripts/make_bdt_table.py at Bari)")
 
-    ci = [cn.index(n) for n in RUN2LIKE_CAND if n in cn]
-    cols, names = [cand[:, ci]], [cn[i] for i in ci]
-    for n in RUN2LIKE_MU:
-        if n in mn:
-            v = mu[:, :, mn.index(n)].astype(np.float32)
-            cols += [v.min(1, keepdims=True), v.max(1, keepdims=True)]
-            names += [f"min_mu_{n}", f"max_mu_{n}"]
-    sets["bdt_run2like"] = (np.concatenate(cols, axis=1).astype(np.float32), names, XGB_DEFAULT)
-    X_all = np.concatenate([cand, mu.reshape(len(mu), -1)], axis=1).astype(np.float32)
-    sets["bdt_candmu"] = (X_all, cn + [f"mu{i + 1}_{n}" for i in range(mu.shape[1]) for n in mn], XGB_DEFAULT)
+    sets["bdt_run2like"] = run2like_matrix(cn, mn, cand, mu) + (XGB_DEFAULT,)
+    sets["bdt_candmu"] = candmu_matrix(cn, mn, cand, mu) + (XGB_DEFAULT,)
     if "isGlobal" in mn:
         extra["is3glb"] = (mu[:, :, mn.index("isGlobal")].astype(np.float32) > 0.5).all(1)
     return sets, extra
@@ -140,7 +150,7 @@ def train_bdt(X, meta, fold, params, prod_frac=None, npv_reweight=True, seed=0):
                                              validation_fraction=0.1, random_state=seed)
         clf.fit(X[rows_tr], y[rows_tr], sample_weight=w[rows_tr])
         info = f"sklearn HistGradientBoosting, {clf.n_iter_} iterations (xgboost not available)"
-    return rows_te, clf.predict_proba(X[rows_te])[:, 1], w, info
+    return rows_te, clf.predict_proba(X[rows_te])[:, 1], w, info, clf
 
 
 # ---------------------------------------------------------------- metrics
@@ -311,14 +321,15 @@ def compare(data_dir, out_dir, bkg_scale, folds=range(5), plots=True):
     cfg = json.load(open(cfg_path)) if os.path.exists(cfg_path) else {}
     prod = {int(a): float(b) for a, b in cfg["prod_frac"].items()} if cfg.get("prod_frac") else None
 
-    scores, info = {}, {}
+    scores, info, models = {}, {}, {}
     w_all = np.zeros(len(meta["role"]), dtype=np.float32)
     for name, (X, names, params) in sets.items():
         scores[name] = np.full(len(meta["role"]), np.nan, dtype=np.float32)
         for k in folds:
             t1 = time.time()
-            rows, s, w, inf = train_bdt(X, meta, k, params, prod_frac=prod,
-                                        npv_reweight=cfg.get("npv_reweight", True))
+            rows, s, w, inf, clf = train_bdt(X, meta, k, params, prod_frac=prod,
+                                             npv_reweight=cfg.get("npv_reweight", True))
+            models[(name, k)] = clf
             scores[name][rows] = s
             w_all[rows] = w[rows]
             print(f"{name} ({len(names)} inputs) fold {k}: {inf}, {time.time() - t1:.0f} s", flush=True)
@@ -374,11 +385,33 @@ def compare(data_dir, out_dir, bkg_scale, folds=range(5), plots=True):
         json.dump(res, fh, indent=1, default=float)
     np.savez(os.path.join(ev, "compare_scores.npz"), **{f"score_{k}": v for k, v in scores.items()},
              **meta, **extra, weight=w)
+    save_models(ev, models, info, scores, meta, w)
     print_table(res, list(subsets))
     if plots:
         make_plots(scores, meta, w, subsets, ev)
         plot_fits(scores, meta, w, res, ev)
     return res
+
+
+def save_models(ev, models, info, scores, meta, w, effs=(0.9, 0.8, 0.5, 0.2)):
+    """The trained BDTs, their input names and the score cuts at fixed tau signal efficiency, for
+    applying the same classifiers elsewhere (scripts/control_datamc.py score)."""
+    d = os.path.join(ev, "bdt_models")
+    os.makedirs(d, exist_ok=True)
+    for (name, k), clf in models.items():
+        if hasattr(clf, "save_model"):
+            clf.save_model(os.path.join(d, f"{name}_fold{k}.json"))
+        else:
+            import pickle
+            with open(os.path.join(d, f"{name}_fold{k}.pkl"), "wb") as fh:
+                pickle.dump(clf, fh)
+    sig = meta["role"] == 0
+    cuts = {name: {f"{e:g}": float(cut_at_sig_eff(s[sig], meta["label"][sig], w[sig], e)) for e in effs}
+            for name, s in scores.items()}
+    with open(os.path.join(d, "models.json"), "w") as fh:
+        json.dump({"inputs": {n: i["inputs"] for n, i in info.items()},
+                   "tau_signal_eff_cuts": cuts}, fh, indent=1)
+    print(f"saved the BDT models and the score cuts at tau signal efficiency {effs} in {d}")
 
 
 def print_table(res, subsets):

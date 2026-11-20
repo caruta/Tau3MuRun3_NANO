@@ -10,6 +10,11 @@
 #   (all done)  python3 control_datamc.py hist-merge --work <work> --expect-parts 100
 #   python3 control_datamc.py report --work <work> --model-config <OUT>/fold0/config.json
 #
+# Classifier scores on Ds -> phi pi (needs fit.json from fit-merge, torch and xgboost):
+#   condor_submit $C stage=score extra="--model <OUT>/fold0/best.pt --bdt-dir <OUT>/eval/bdt_models" \
+#       $CMSSW_BASE/src/PhysicsTools/Tau3muML/scripts/submit_control_datamc.sub
+#   (all done)  python3 control_datamc.py score-report --work <work> --bdt-dir <OUT>/eval/bdt_models
+#
 # Extra options for control_datamc.py (e.g. --data-frac 0.25) go in extra="...".
 executable     = $(cmssw)/src/PhysicsTools/Tau3muML/scripts/run_script.sh
 arguments      = $(cmssw) control_datamc.py $(stage) --flat-dir $(flat) --train-set $(trainset) --work $(work) --jobs 2 --part $(Process) --nparts $(nparts) $(extra)

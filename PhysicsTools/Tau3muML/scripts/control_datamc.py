@@ -48,7 +48,7 @@ import numpy as np
 
 # the ntuple readers are needed only by the fit and hist stages; the merge and report stages run
 # with numpy, scipy and matplotlib alone (e.g. on SWAN or a laptop, from fit.json and hists.npz)
-if not any(a in sys.argv[1:2] for a in ("report", "fit-merge", "hist-merge")):
+if not any(a in sys.argv[1:2] for a in ("report", "fit-merge", "hist-merge", "score-report")):
     import awkward as ak
     import uproot
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -491,6 +491,274 @@ def stage2_merge(args):
     print(f"merged {len(parts)} parts into {args.work}/hists.npz")
 
 
+# ---------------------------------------------------------------- stage 4: classifier scores on Ds -> phi pi
+METHODS = ["transformer", "bdt_run2", "bdt_run2like", "bdt_candmu"]
+
+
+def compute_tolerant(a, names):
+    """features.compute, but an input that cannot be computed on these files is set to 0 (as for
+    padding) instead of stopping; returns the arrays and the names of such inputs."""
+    N = len(a)
+    missing = []
+    cand = np.zeros((N, len(names["cand"])), np.float32)
+    for i, k in enumerate(names["cand"]):
+        try:
+            cand[:, i] = np.nan_to_num(ak.to_numpy(F.CAND_FEATURES[k](a)).astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        except Exception:
+            missing.append(f"cand:{k}")
+    out = {"cand": cand}
+    for t, feats in names["tokens"].items():
+        n = names["token_max"][t]
+        key = f"{t}_eta" if f"{t}_eta" in a.fields else f"{t}_pt"
+        counts = ak.to_numpy(ak.num(a[key], axis=1)) if key in a.fields else np.zeros(N, int)
+        mask = np.arange(n)[None, :] < np.minimum(counts, n)[:, None]
+        arr = np.zeros((N, n, len(feats)), np.float32)
+        for i, k in enumerate(feats):
+            try:
+                col = F._pad(F.TOKEN_FEATURES[t][k](a), n)
+                col[~np.isfinite(col) | ~mask] = 0.0
+                arr[:, :, i] = col
+            except Exception:
+                missing.append(f"{t}:{k}")
+        out[f"{t}_feats"], out[f"{t}_mask"] = arr, mask
+    return out, missing
+
+
+def load_classifiers(model_path, bdt_dir, threads):
+    """The transformer (fold 0 checkpoint) and the saved BDTs (fold 0); missing ones are skipped."""
+    clf, names, info = {}, None, json.load(open(os.path.join(bdt_dir, "models.json")))
+    try:
+        import torch
+        torch.set_num_threads(threads)
+        from tau3muml.train import load_model
+        clf["transformer"] = load_model(model_path, torch.device("cpu"))
+        names = torch.load(model_path, map_location="cpu", weights_only=False)["stats"]["features"]
+    except Exception as e:
+        print(f"transformer skipped: {type(e).__name__}: {str(e)[:200]}")
+    try:
+        import xgboost as xgb
+        for m in METHODS[1:]:
+            path = os.path.join(bdt_dir, f"{m}_fold0.json")
+            if os.path.exists(path):
+                b = xgb.XGBClassifier()
+                b.load_model(path)
+                clf[m] = b
+    except Exception as e:
+        print(f"BDTs skipped: {type(e).__name__}: {str(e)[:200]}")
+    return clf, names, info
+
+
+def score_file(args):
+    path, sample, is_data, cfg, names, model_path, bdt_dir, threads = args
+    import make_bdt_table as MB
+    from tau3muml.compare_bdt import candmu_matrix, run2like_matrix
+    clf, mnames, info = load_classifiers(model_path, bdt_dir, threads)
+    names = mnames or names
+    rng = np.random.default_rng(zlib.crc32(path.encode()))
+    res = {k: [] for k in ["run", "mass", "npv", "sample_is_data"] + [f"score_{m}" for m in clf]}
+    missing = set()
+    try:
+        br = F.required_branches(names) + SEL_BRANCHES + MB.BRANCHES + (["Trigger_" + cfg["hlt"]] if cfg["hlt"] else [])
+        for a in read_chunks(path, list(dict.fromkeys(br)), cfg["step"]):
+            ok, m = selection(a, is_data, cfg)
+            ok &= (m >= LOCAL_FIT[0]) & (m <= LOCAL_FIT[1])
+            if is_data and cfg["data_frac"] < 1:
+                ok &= rng.random(len(ok)) < cfg["data_frac"]
+            if not ok.any():
+                continue
+            a = a[ok]
+            x, miss = compute_tolerant(a, names)
+            missing |= set(miss)
+            cn, mn = names["cand"], names["tokens"]["mu"]
+            if "transformer" in clf:
+                import torch
+                from tau3muml.data import to_torch
+                sc = np.zeros(len(a), np.float32)
+                with torch.no_grad():
+                    for i in range(0, len(a), 1024):
+                        xb = to_torch({k: v[i:i + 1024] for k, v in x.items()}, torch.device("cpu"))
+                        sc[i:i + 1024] = torch.sigmoid(clf["transformer"](xb).float()).numpy()
+                res["score_transformer"].append(sc)
+            X = {"bdt_run2like": run2like_matrix(cn, mn, x["cand"], x["mu_feats"])[0],
+                 "bdt_candmu": candmu_matrix(cn, mn, x["cand"], x["mu_feats"])[0]}
+            if "bdt_run2" in clf:
+                try:
+                    v = MB.compute(a)
+                    X["bdt_run2"] = np.stack([np.asarray(v[n], np.float32) for n in info["inputs"]["bdt_run2"]], 1)
+                except Exception as e:
+                    missing.add(f"bdt_run2 inputs ({type(e).__name__}: {str(e)[:120]})")
+                    X["bdt_run2"] = np.full((len(a), len(info["inputs"]["bdt_run2"])), np.nan, np.float32)
+            for mth in METHODS[1:]:
+                if mth in clf:
+                    res[f"score_{mth}"].append(clf[mth].predict_proba(X[mth])[:, 1].astype(np.float32))
+            res["run"].append(ak.to_numpy(a["run"]))
+            res["mass"].append(m[ok].astype(np.float32))
+            res["npv"].append(ak.to_numpy(a["nPVtx"]).astype(np.int16))
+            res["sample_is_data"].append(np.full(len(a), is_data))
+    except Exception as e:
+        return f"{path}: {type(e).__name__}: {str(e)[:300]}"
+    out = {k: np.concatenate(v) for k, v in res.items() if v}
+    out["sample"] = np.full(len(out.get("run", [])), sample)
+    return out, sorted(missing)
+
+
+def stage_score(args, cfg, names, files):
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    tasks = [(f, s, d, cfg, names, args.model, args.bdt_dir, args.threads) for f, s, d in files]
+    parts, errors, missing, t0 = [], [], set(), time.time()
+    with mp.Pool(args.jobs) as pool:
+        for i, r in enumerate(pool.imap_unordered(score_file, tasks, chunksize=1)):
+            if isinstance(r, str):
+                errors.append(r)
+                continue
+            if len(r[0].get("run", [])):
+                parts.append(r[0])
+            missing |= set(r[1])
+            if i % 10 == 0:
+                n = sum(len(p["run"]) for p in parts)
+                print(f"  score: {i + 1}/{len(files)} files, {n} candidates, {time.time() - t0:.0f} s", flush=True)
+    for e in errors:
+        print("  failed:", e)
+    if missing:
+        print("inputs not computable on these files (set to 0):", sorted(missing))
+    keys = set.intersection(*[set(p) for p in parts]) if parts else set()
+    out = {k: np.concatenate([p[k] for p in parts]) for k in keys}
+    tag = f"_part{args.part:04d}" if args.nparts > 1 else ""
+    path = os.path.join(args.work, "parts" if args.nparts > 1 else "", f"scores{tag}.npz")
+    np.savez_compressed(path, **out)
+    print(f"wrote {path} ({len(out.get('run', []))} candidates, methods: "
+          f"{[k[6:] for k in out if k.startswith('score_')]})")
+
+
+def fit_yield(counts, edges, par, free_shape=False):
+    """Ds yield in `counts` with the peak shapes of `par` fixed (yields and background free; with
+    free_shape also the Ds mass and width). Returns (N_Ds, its statistical error)."""
+    from scipy.optimize import minimize
+    xa = 0.5 * (edges[1:] + edges[:-1])
+    sel = (xa >= LOCAL_FIT[0]) & (xa <= LOCAL_FIT[1])
+    x, n = xa[sel], counts[sel].astype(float)
+    w = edges[1] - edges[0]
+    T = max(n.sum(), 1.0)
+
+    def dens(q):
+        p = dict(par, frac_Ds=q[0], frac_Dplus=q[1], b0=q[2], b1=q[3], b2=q[4])
+        if free_shape:
+            p.update(m_Ds=q[5], sigma1=q[6])
+        return np.sum(_model_density(p, T, x), axis=0) * w
+
+    def nll(q):
+        mu = np.maximum(dens(q), 1e-9)
+        return float(np.sum(mu - n * np.log(mu)))
+
+    q0 = [par["frac_Ds"], par["frac_Dplus"], par["b0"], par["b1"], par["b2"]]
+    bounds = [(0, 1), (0, 1), (None, None), (None, None), (None, None)]
+    if free_shape:
+        q0 += [par["m_Ds"], par["sigma1"]]
+        bounds += [(par["m_Ds"] - 0.005, par["m_Ds"] + 0.005), (0.5 * par["sigma1"], 1.5 * par["sigma1"])]
+    r = minimize(nll, q0, bounds=bounds, method="L-BFGS-B")
+    r = minimize(nll, r.x, bounds=bounds, method="Powell")
+    q = r.x
+    h = max(q[0] * 1e-2, 1.0 / T)              # curvature in the Ds fraction, others at the minimum
+    if q[0] > h:
+        d2 = (nll([q[0] + h, *q[1:]]) - 2 * nll(q) + nll([q[0] - h, *q[1:]])) / h ** 2
+    else:                                      # at the boundary: one-sided
+        d2 = (nll([q[0] + 2 * h, *q[1:]]) - 2 * nll([q[0] + h, *q[1:]]) + nll(q)) / h ** 2
+    return q[0] * T, (T / np.sqrt(d2) if d2 > 0 else np.nan)
+
+
+def score_report(args):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fit = json.load(open(os.path.join(args.work, "fit.json")))
+    files = sorted(glob.glob(os.path.join(args.work, "parts", "scores_part*.npz"))) or \
+        [os.path.join(args.work, "scores.npz")]
+    zs = [dict(np.load(f, allow_pickle=True)) for f in files]
+    keys = set.intersection(*[set(z) for z in zs])
+    z = {k: np.concatenate([q[k] for q in zs]) for k in keys}
+    methods = [m for m in METHODS if f"score_{m}" in z]
+    print(f"{len(files)} score files, {len(z['run'])} candidates, methods {methods}")
+    tau_cuts = {}
+    if args.bdt_dir and os.path.exists(os.path.join(args.bdt_dir, "models.json")):
+        tau_cuts = json.load(open(os.path.join(args.bdt_dir, "models.json"))).get("tau_signal_eff_cuts", {})
+    data = z["sample_is_data"].astype(bool)
+    era = np.array([era_of(str(s)) for s in z["sample"]])
+    run = z["run"]
+    groups = {"all": data, "early": data & (run < RUN_SPLIT), "late": data & (run >= RUN_SPLIT)}
+    for e in sorted(set(era[data])):
+        groups[f"era{e}"] = data & (era == e)
+    groups = {g: m for g, m in groups.items() if g in fit["fits"] and m.sum() >= args.min_cands}
+    edges = np.asarray(fit["mass_edges"])
+    mc = ~data
+    npv = np.clip(z["npv"].astype(int), 0, 99)
+    rows = []
+    for meth in methods:
+        s = z[f"score_{meth}"]
+        w_all = np.asarray(fit["pv_weights"]["all"])[npv]
+        cuts = {f"Ds MC eff {e:g}": float(np.quantile(s[mc], 1 - e)) for e in (0.8, 0.5, 0.2)}
+        for e, c in tau_cuts.get(meth, {}).items():
+            cuts[f"tau eff {e}"] = c
+        for g, gm in groups.items():
+            par = fit["fits"][g]["params"]
+            wm = np.asarray(fit["pv_weights"][g])[npv]
+            h_all = np.histogram(z["mass"][gm], edges)[0]
+            n_all, e_all = fit_yield(h_all, edges, par)
+            n_all_f, _ = fit_yield(h_all, edges, par, free_shape=True)
+            for cname, c in cuts.items():
+                p = gm & (s >= c)
+                h_p = np.histogram(z["mass"][p], edges)[0]
+                n_p, e_p = fit_yield(h_p, edges, par)
+                n_p_f, _ = fit_yield(h_p, edges, par, free_shape=True)
+                eff_d = n_p / n_all             # error: that of N_pass only (N_all is ~fixed by comparison)
+                err_d = e_p / n_all
+                eff_m = float(wm[mc & (s >= c)].sum() / wm[mc].sum())
+                err_m = float(np.sqrt(eff_m * (1 - eff_m) / mc.sum()))
+                rows.append(dict(method=meth, group=g, cut=cname, threshold=c, eff_data=eff_d, err_data=err_d,
+                                 eff_mc=eff_m, err_mc=err_m, ratio=eff_d / eff_m if eff_m > 0 else np.nan,
+                                 ratio_err=np.hypot(err_d / max(eff_m, 1e-9), eff_d * err_m / max(eff_m, 1e-9) ** 2),
+                                 ratio_free_shape=(n_p_f / n_all_f) / eff_m if eff_m > 0 else np.nan,
+                                 ds_all=n_all, ds_pass=n_p))
+        print(f"  {meth} done", flush=True)
+    rep = os.path.join(args.work, "report")
+    os.makedirs(rep, exist_ok=True)
+    import csv
+    with open(os.path.join(rep, "score_efficiency.csv"), "w", newline="") as fh:
+        wr = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        wr.writeheader()
+        wr.writerows(rows)
+    cuts_all = list(dict.fromkeys(r["cut"] for r in rows))
+    print(f"\n{'method':14s} {'cut':16s} " + " ".join(f"{g:>13s}" for g in groups) + "   (data/MC efficiency ratio)")
+    for meth in methods:
+        for c in cuts_all:
+            rr = {r["group"]: r for r in rows if r["method"] == meth and r["cut"] == c}
+            if rr:
+                print(f"{meth:14s} {c:16s} " + " ".join(f"{rr[g]['ratio']:6.3f}±{rr[g]['ratio_err']:.3f}" if g in rr else " " * 13
+                                                         for g in groups))
+    eras = [g for g in groups if g.startswith("era")]
+    sel_cuts = [c for c in cuts_all if c.startswith("Ds MC")] + [c for c in cuts_all if c.startswith("tau")][:2]
+    fig, axs = plt.subplots(1, len(sel_cuts), figsize=(4.6 * len(sel_cuts), 4.2), squeeze=False)
+    colors = {"transformer": "C0", "bdt_run2like": "C1", "bdt_candmu": "C2", "bdt_run2": "C3"}
+    for ax, c in zip(axs[0], sel_cuts):
+        for k, meth in enumerate(methods):
+            rr = {r["group"]: r for r in rows if r["method"] == meth and r["cut"] == c}
+            xs = np.arange(len(eras)) + (k - 1.5) * 0.08
+            ax.errorbar(xs, [rr[g]["ratio"] for g in eras], [rr[g]["ratio_err"] for g in eras], fmt="o-", ms=4,
+                        color=colors[meth], label=meth)
+        ax.axhline(1, color="k", lw=0.8)
+        ax.set_ylim(0, 2)                       # points outside (empty bins in small groups) are clipped
+        ax.set_xticks(range(len(eras)))
+        ax.set_xticklabels(eras, rotation=45)
+        ax.set_title(c, fontsize=10)
+        ax.set_ylabel("efficiency data / MC")
+        ax.grid(alpha=0.3)
+    axs[0][0].legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(rep, "score_efficiency_ratio.png"), dpi=120)
+    plt.close(fig)
+    print(f"wrote {rep}/score_efficiency.csv and score_efficiency_ratio.png")
+
+
 # ---------------------------------------------------------------- stage 3: report
 
 def _model_density(par, T, m):
@@ -679,7 +947,7 @@ def report(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("stage", choices=["fit", "fit-merge", "hist", "hist-merge", "report"])
+    ap.add_argument("stage", choices=["fit", "fit-merge", "hist", "hist-merge", "report", "score", "score-report"])
     ap.add_argument("--work", required=True, help="output directory")
     ap.add_argument("--flat-dir")
     ap.add_argument("--train-set", help="training set (its stats.json gives the transformer inputs)")
@@ -697,6 +965,10 @@ def main():
     ap.add_argument("--part", type=int, default=0, help="batch mode: this job processes files part, part+nparts, ...")
     ap.add_argument("--nparts", type=int, default=1, help="batch mode: number of jobs (outputs go to WORK/parts/)")
     ap.add_argument("--expect-parts", type=int, default=0, help="merge stages: stop if fewer parts are found")
+    ap.add_argument("--model", help="score: transformer checkpoint (<OUT>/fold0/best.pt)")
+    ap.add_argument("--bdt-dir", help="score, score-report: <OUT>/eval/bdt_models (saved by compare_bdt)")
+    ap.add_argument("--threads", type=int, default=2, help="score: torch threads per process")
+    ap.add_argument("--min-cands", type=int, default=1000, help="score-report: skip data groups with fewer candidates")
     args = ap.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
     os.makedirs(args.work, exist_ok=True)
@@ -706,6 +978,8 @@ def main():
         return stage1_merge(args)
     if args.stage == "hist-merge":
         return stage2_merge(args)
+    if args.stage == "score-report":
+        return score_report(args)
     if args.nparts > 1:
         os.makedirs(os.path.join(args.work, "parts"), exist_ok=True)
     cfg = dict(phi_window=args.phi_window, trk_pt_min=args.trk_pt_min, fsig_min=args.fsig_min, hlt=args.hlt,
@@ -720,7 +994,7 @@ def main():
     if args.nparts > 1:
         files = files[args.part::args.nparts]
         print(f"part {args.part} of {args.nparts}: {len(files)} files")
-    (stage1 if args.stage == "fit" else stage2)(args, cfg, names, files)
+    {"fit": stage1, "hist": stage2, "score": stage_score}[args.stage](args, cfg, names, files)
 
 
 if __name__ == "__main__":
