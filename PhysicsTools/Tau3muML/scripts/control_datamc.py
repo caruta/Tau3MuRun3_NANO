@@ -490,9 +490,34 @@ def stage2_merge(args):
 
 # ---------------------------------------------------------------- stage 3: report
 
+def _model_density(par, T, m):
+    """Background, Ds and D+ densities (events/GeV) of fit_mass, from its stored parameters."""
+    g = lambda x, mu, sg: np.exp(-0.5 * ((x - mu) / sg) ** 2) / (np.sqrt(2 * np.pi) * sg)
+    u = (m - 1.98) / 0.1
+    bkg = T * np.maximum(par["b0"] + par["b1"] * u + par["b2"] * u * u, 0) / (LOCAL_FIT[1] - LOCAL_FIT[0])
+    mu, s1 = par["m_Ds"], par["sigma1"]
+    ds = T * par["frac_Ds"] * (par["f_core"] * g(m, mu, s1) + (1 - par["f_core"]) * g(m, mu, par["k_tail"] * s1))
+    dp = T * par["frac_Dplus"] * g(m, par["m_Dplus"], s1 * par["m_Dplus"] / mu)
+    return bkg, ds, dp
+
+
 def alphas(f):
-    """Sideband scales: linear interpolation in mass if available, else one common scale."""
-    return (f["alpha_l"], f["alpha_r"]) if "alpha_l" in f else (f["alpha"], f["alpha"])
+    """Sideband scales that interpolate the background linearly in mass to the peak centre.
+    Taken from fit.json, or derived from its fit parameters for a fit.json written before they were
+    stored; a fit without parameters falls back to one common scale."""
+    if "alpha_l" in f:
+        return f["alpha_l"], f["alpha_r"]
+    par = f.get("params", {})
+    if "frac_Ds" not in par or "b0" not in par:
+        return f["alpha"], f["alpha"]
+    T = f["N_Ds"] / par["frac_Ds"]
+    lo, hi = f["peak"]
+    b_peak = _window_sum(lo, hi, lambda m: _model_density(par, T, m)[0])
+    tot = lambda m: np.sum(_model_density(par, T, m), axis=0)
+    m_l, m_r = _window_sum(*SBL, tot), _window_sum(*SBR, tot)
+    c, cl, cr = 0.5 * (lo + hi), 0.5 * sum(SBL), 0.5 * sum(SBR)
+    w_l = (cr - c) / (cr - cl)
+    return w_l * b_peak / m_l, (1 - w_l) * b_peak / m_r
 
 
 def separation(d, m):
@@ -527,6 +552,9 @@ def report(args):
             dropped |= {f"{t}:*"}
         print(f"inputs ignored by the model: {sorted(dropped) or 'none'}")
     groups = [g for g in sorted(fit["fits"], key=lambda g: (g not in ("all", "early", "late"), g))]
+    for g in groups:
+        al, ar = alphas(fit["fits"][g])
+        print(f"  {g:7s} sideband scales left {al:.4f} right {ar:.4f}")
     rep = os.path.join(args.work, "report")
     os.makedirs(rep, exist_ok=True)
     rows, sep = [], {}
